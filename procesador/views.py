@@ -183,6 +183,8 @@ def dashboard(request):
                                     # Ignorar archivos con estructura inválida
                                     continue
 
+                sincronizar_estado_facturas_xls()
+
                 return redirect("dashboard")
     else:
         form_excel = UploadExcelForm()
