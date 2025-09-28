@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Gestión Facturación</title>
+</head>
+<body>
+    <h1>Gestión Facturación</h1>
+
+    <!-- 📌 Subir Excel -->
+    <h3>Subir Excel</h3>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {{ form_excel.as_p }}
+        <button type="submit" name="upload_excel">📂 Cargar Excel</button>
+    </form>
+
+    <!-- 📌 Subir ZIP con XML -->
+    <h3>Subir ZIP con XML</h3>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {{ form_zip.as_p }}
+        <button type="submit" name="upload_zip">📂 Cargar ZIP</button>
+    </form>
+
+    <hr>
+
+    <!-- 📌 Facturas desde Excel -->
+    <h2>📑 Facturas desde Excel</h2>
+    <table border="1" cellspacing="0" cellpadding="5">
+        <thead>
+            <tr>
+                <th>Tipo Documento</th>
+                <th>CUFE/CUDE</th>
+                <th>Folio</th>
+                <th>Prefijo</th>
+                <th>NIT Emisor</th>
+                <th>Nombre Emisor</th>
+                <th>IVA</th>
+                <th>INC</th>
+                <th>Total</th>
+                <th>Activo (XML)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for factura in facturas_xls %}
+            <tr>
+                <td>{{ factura.tipo_documento }}</td>
+                <td>{{ factura.cufe }}</td>
+                <td>{{ factura.folio }}</td>
+                <td>{{ factura.prefijo }}</td>
+                <td>{{ factura.nit_emisor }}</td>
+                <td>{{ factura.nombre_emisor }}</td>
+                <td>{{ factura.iva }}</td>
+                <td>{{ factura.inc }}</td>
+                <td>{{ factura.total }}</td>
+                <td>{% if factura.activo %}✅ Sí{% else %}❌ No{% endif %}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="10">No hay facturas desde Excel cargadas.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <hr>
+
+    <!-- 📌 Facturas desde XML -->
+    <h2>📑 Facturas desde XML</h2>
+    <table border="1" cellspacing="0" cellpadding="5">
+        <thead>
+            <tr>
+                <th>CUFE</th>
+                <th>Fecha</th>
+                <th>Descripción</th>
+                <th>Subtotal</th>
+                <th>IVA</th>
+                <th>Total</th>
+                <th>Proveedor</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for factura in facturas_xml %}
+            <tr>
+                <td>{{ factura.cufe }}</td>
+                <td>{{ factura.fecha }}</td>
+                <td>{{ factura.descripcion }}</td>
+                <td>{{ factura.subtotal }}</td>
+                <td>{{ factura.iva }}</td>
+                <td>{{ factura.total }}</td>
+                <td>{{ factura.proveedor.nombre }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="7">No hay facturas XML cargadas.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+</body>
+</html>
