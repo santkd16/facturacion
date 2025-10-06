@@ -3,6 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <title>Gestión Facturación</title>
+    <style>
+        .tabla-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .tabla-tabs button {
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+            border-radius: 4px 4px 0 0;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+        }
+
+        .tabla-tabs button:focus {
+            outline: 2px solid #1d70b8;
+            outline-offset: 2px;
+        }
+
+        .tabla-tabs button[aria-pressed="true"],
+        .tabla-tabs button.active {
+            background-color: #1d70b8;
+            color: #fff;
+            border-color: #1d70b8;
+        }
+
+        .tabla-contenido {
+            border: 1px solid #ccc;
+            padding: 1rem;
+            border-radius: 0 4px 4px 4px;
+        }
+
+        .tabla-oculta {
+            display: none;
+        }
+    </style>
 </head>
 <body>
     <h1>Gestión Facturación</h1>
@@ -25,79 +62,120 @@
 
     <hr>
 
-    <!-- 📌 Facturas desde Excel -->
-    <h2>📑 Facturas desde Excel</h2>
-    <table border="1" cellspacing="0" cellpadding="5">
-        <thead>
-            <tr>
-                <th>Tipo Documento</th>
-                <th>CUFE/CUDE</th>
-                <th>Folio</th>
-                <th>Prefijo</th>
-                <th>NIT Emisor</th>
-                <th>Nombre Emisor</th>
-                <th>IVA</th>
-                <th>INC</th>
-                <th>Total</th>
-                <th>Activo (XML)</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for factura in facturas_xls %}
-            <tr>
-                <td>{{ factura.tipo_documento }}</td>
-                <td>{{ factura.cufe }}</td>
-                <td>{{ factura.folio }}</td>
-                <td>{{ factura.prefijo }}</td>
-                <td>{{ factura.nit_emisor }}</td>
-                <td>{{ factura.nombre_emisor }}</td>
-                <td>{{ factura.iva }}</td>
-                <td>{{ factura.inc }}</td>
-                <td>{{ factura.total }}</td>
-                <td>{% if factura.activo %}✅ Sí{% else %}❌ No{% endif %}</td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="10">No hay facturas desde Excel cargadas.</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="tabla-tabs" role="tablist" aria-label="Tablas de facturas">
+        <button type="button" role="tab" id="tab-excel" aria-controls="tabla-excel" aria-pressed="true" aria-selected="true" tabindex="0" class="active">📑 Facturas desde Excel</button>
+        <button type="button" role="tab" id="tab-xml" aria-controls="tabla-xml" aria-pressed="false" aria-selected="false" tabindex="-1">📑 Facturas desde XML</button>
+    </div>
 
-    <hr>
+    <div id="tabla-excel" class="tabla-contenido" role="tabpanel" aria-labelledby="tab-excel" data-tab="excel" tabindex="-1">
+        <h2>📑 Facturas desde Excel</h2>
+        <table border="1" cellspacing="0" cellpadding="5">
+            <thead>
+                <tr>
+                    <th>Tipo Documento</th>
+                    <th>CUFE/CUDE</th>
+                    <th>Folio</th>
+                    <th>Prefijo</th>
+                    <th>NIT Emisor</th>
+                    <th>Nombre Emisor</th>
+                    <th>IVA</th>
+                    <th>INC</th>
+                    <th>Total</th>
+                    <th>Activo (XML)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for factura in facturas_xls %}
+                <tr>
+                    <td>{{ factura.tipo_documento }}</td>
+                    <td>{{ factura.cufe }}</td>
+                    <td>{{ factura.folio }}</td>
+                    <td>{{ factura.prefijo }}</td>
+                    <td>{{ factura.nit_emisor }}</td>
+                    <td>{{ factura.nombre_emisor }}</td>
+                    <td>{{ factura.iva }}</td>
+                    <td>{{ factura.inc }}</td>
+                    <td>{{ factura.total }}</td>
+                    <td>{% if factura.activo %}✅ Sí{% else %}❌ No{% endif %}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="10">No hay facturas desde Excel cargadas.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 
-    <!-- 📌 Facturas desde XML -->
-    <h2>📑 Facturas desde XML</h2>
-    <table border="1" cellspacing="0" cellpadding="5">
-        <thead>
-            <tr>
-                <th>CUFE</th>
-                <th>Fecha</th>
-                <th>Descripción</th>
-                <th>Subtotal</th>
-                <th>IVA</th>
-                <th>Total</th>
-                <th>Proveedor </th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for factura in facturas_xml %}
-            <tr>
-                <td>{{ factura.cufe }}</td>
-                <td>{{ factura.fecha }}</td>
-                <td>{{ factura.descripcion }}</td>
-                <td>{{ factura.subtotal }}</td>
-                <td>{{ factura.iva }}</td>
-                <td>{{ factura.total }}</td>
-                <td>{{ factura.proveedor.nombre }}</td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="7">No hay facturas XML cargadas.</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div id="tabla-xml" class="tabla-contenido tabla-oculta" role="tabpanel" aria-labelledby="tab-xml" data-tab="xml" tabindex="-1" hidden>
+        <h2>📑 Facturas desde XML</h2>
+        <table border="1" cellspacing="0" cellpadding="5">
+            <thead>
+                <tr>
+                    <th>CUFE</th>
+                    <th>Fecha</th>
+                    <th>Descripción</th>
+                    <th>Subtotal</th>
+                    <th>IVA</th>
+                    <th>Total</th>
+                    <th>Proveedor </th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for factura in facturas_xml %}
+                <tr>
+                    <td>{{ factura.cufe }}</td>
+                    <td>{{ factura.fecha }}</td>
+                    <td>{{ factura.descripcion }}</td>
+                    <td>{{ factura.subtotal }}</td>
+                    <td>{{ factura.iva }}</td>
+                    <td>{{ factura.total }}</td>
+                    <td>{{ factura.proveedor.nombre }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7">No hay facturas XML cargadas.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        (function () {
+            const tabs = document.querySelectorAll('.tabla-tabs button');
+            const panels = document.querySelectorAll('.tabla-contenido');
+
+            tabs.forEach((tab) => {
+                tab.addEventListener('click', () => {
+                    const targetId = tab.getAttribute('aria-controls');
+
+                    tabs.forEach((btn) => {
+                        const isActive = btn === tab;
+                        btn.classList.toggle('active', isActive);
+                        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+                        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                        btn.setAttribute('tabindex', isActive ? '0' : '-1');
+                    });
+
+                    panels.forEach((panel) => {
+                        const isTarget = panel.id === targetId;
+                        panel.classList.toggle('tabla-oculta', !isTarget);
+                        panel.toggleAttribute('hidden', !isTarget);
+                    });
+
+                    const targetPanel = document.getElementById(targetId);
+                    if (targetPanel) {
+                        try {
+                            targetPanel.focus({ preventScroll: true });
+                        } catch (error) {
+                            targetPanel.focus();
+                        }
+                    }
+                });
+            });
+        })();
+    </script>
 
 </body>
 </html>
