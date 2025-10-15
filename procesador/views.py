@@ -1,5 +1,7 @@
 from __future__ import annotations
-import os, tempfile, zipfile
+import os
+import tempfile
+import zipfile
 from decimal import Decimal, InvalidOperation
 import xml.etree.ElementTree as ET
 import pandas as pd
@@ -10,12 +12,14 @@ from django.utils.dateparse import parse_date
 from .forms import UploadExcelForm, UploadZipForm
 from .models import FacturaXML, FacturaXLS, Proveedor, Retencion, TarifaICA
 
+# Namespaces for XML UBL
 ns = {
     "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
     "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
 }
 
-def _find_text(element, path, *, required=False, default=None):
+
+def _find_text(element, path, *, required: bool = False, default=None):
     node = element.find(path, ns)
     if node is not None and node.text is not None:
         return node.text.strip()
@@ -23,12 +27,14 @@ def _find_text(element, path, *, required=False, default=None):
         raise ValueError(f"El nodo requerido '{path}' no se encontró en el XML")
     return default
 
-def _parse_decimal(value, default=Decimal("0")):
+
+def _parse_decimal(value, default: Decimal = Decimal("0")) -> Decimal:
     if value is None:
         return default
     cleaned = str(value).strip().replace("$", "")
     if not cleaned:
         return default
+    # convert decimal with comma as decimal separator
     if cleaned.count(",") == 1 and cleaned.count(".") == 0:
         cleaned = cleaned.replace(",", ".")
     else:
@@ -37,6 +43,7 @@ def _parse_decimal(value, default=Decimal("0")):
         return Decimal(cleaned)
     except (InvalidOperation, TypeError):
         return default
+
 
 def sincronizar_estado_facturas_xls():
     xml_cufes = set(FacturaXML.objects.values_list("cufe", flat=True))
@@ -49,7 +56,9 @@ def sincronizar_estado_facturas_xls():
     if actualizar:
         FacturaXLS.objects.bulk_update(actualizar, ["activo"])
 
+
 def procesar_xml(ruta_xml: str) -> None:
+    """Procesa un XML UBL y crea/actualiza el FacturaXML correspondiente."""
     tree = ET.parse(ruta_xml)
     root = tree.getroot()
     cufe = _find_text(root, "cbc:UUID", required=True)
@@ -57,19 +66,47 @@ def procesar_xml(ruta_xml: str) -> None:
     fecha = parse_date(fecha_text)
     if fecha is None:
         raise ValueError("La fecha del documento no tiene un formato válido")
-    proveedor_nombre = _find_text(root, "cac:AccountingSupplierParty/cac:Party/cac:PartyName/cbc:Name", required=True)
-    nit_proveedor = _find_text(root, "cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID", required=True)
-    descripcion = _find_text(root, "cac:InvoiceLine/cac:Item/cbc:Description", default="")
-    subtotal = _parse_decimal(_find_text(root, "cac:LegalMonetaryTotal/cbc:LineExtensionAmount"))
+    proveedor_nombre = _find_text(
+        root,
+        "cac:AccountingSupplierParty/cac:Party/cac:PartyName/cbc:Name",
+        required=True,
+    )
+    nit_proveedor = _find_text(
+        root,
+        "cac:AccountingSupplierParty/cac:Party/cac:PartyTaxScheme/cbc:CompanyID",
+        required=True,
+    )
+    descripcion = _find_text(
+        root,
+        "cac:InvoiceLine/cac:Item/cbc:Description",
+        default="",
+    )
+    subtotal = _parse_decimal(
+        _find_text(root, "cac:LegalMonetaryTotal/cbc:LineExtensionAmount")
+    )
     iva = _parse_decimal(_find_text(root, "cac:TaxTotal/cbc:TaxAmount"))
-    total = _parse_decimal(_find_text(root, "cac:LegalMonetaryTotal/cbc:PayableAmount"))
-    proveedor, _ = Proveedor.objects.get_or_create(nit=nit_proveedor, defaults={"nombre": proveedor_nombre})
+    total = _parse_decimal(
+        _find_text(root, "cac:LegalMonetaryTotal/cbc:PayableAmount")
+    )
+    proveedor, _ = Proveedor.objects.get_or_create(
+        nit=nit_proveedor,
+        defaults={"nombre": proveedor_nombre},
+    )
     FacturaXML.objects.get_or_create(
         cufe=cufe,
-        defaults={"fecha": fecha, "descripcion": descripcion, "subtotal": subtotal, "iva": iva, "total": total, "proveedor": proveedor},
+        defaults={
+            "fecha": fecha,
+            "descripcion": descripcion,
+            "subtotal": subtotal,
+            "iva": iva,
+            "total": total,
+            "proveedor": proveedor,
+        },
     )
 
+
 def dashboard(request):
+    """Vista principal del tablero de facturación."""
     if request.method == "POST":
         # Subir Excel
         if "upload_excel" in request.POST:
@@ -78,7 +115,11 @@ def dashboard(request):
             if form_excel.is_valid():
                 df = pd.read_excel(request.FILES["archivo"])
                 for _, row in df.iterrows():
-                    if row["Tipo de documento"] in ["Factura electrónica", "Documento soporte con no obligados", "Nota de crédito electrónica"]:
+                    if row["Tipo de documento"] in [
+                        "Factura electrónica",
+                        "Documento soporte con no obligados",
+                        "Nota de crédito electrónica",
+                    ]:
                         factura, _ = FacturaXLS.objects.get_or_create(
                             cufe=row["CUFE/CUDE"],
                             defaults={
@@ -92,7 +133,9 @@ def dashboard(request):
                                 "total": row.get("Total", 0) or 0,
                             },
                         )
-                        factura.activo = FacturaXML.objects.filter(cufe=factura.cufe).exists()
+                        factura.activo = FacturaXML.objects.filter(
+                            cufe=factura.cufe
+                        ).exists()
                         factura.save()
                 sincronizar_estado_facturas_xls()
                 return redirect("dashboard")
@@ -127,68 +170,119 @@ def dashboard(request):
     facturas_xls = FacturaXLS.objects.all()
 
     # --- NUEVO: datos para la pestaña Liquidación ---
-    tarifas_ica = list(TarifaICA.objects.all().values_list("valor", flat=True))
+    # Obtener tarifas ICA; si no existen, usar valores por defecto.
+    tarifas_ica = list(
+        TarifaICA.objects.all().values_list("valor", flat=True)
+    )
     if not tarifas_ica:
-        tarifas_ica = [Decimal("4.14"), Decimal("8.66"), Decimal("9.66"), Decimal("13.8")]
+        tarifas_ica = [
+            Decimal("4.14"),
+            Decimal("8.66"),
+            Decimal("9.66"),
+            Decimal("13.8"),
+        ]
 
     liquidaciones = []
     for f in facturas_xls:
-        subtotal = _parse_decimal(f.total) - _parse_decimal(f.iva) - _parse_decimal(f.inc)
+        subtotal = (
+            _parse_decimal(f.total)
+            - _parse_decimal(f.iva)
+            - _parse_decimal(f.inc)
+        )
         proveedor = Proveedor.objects.filter(nit=f.nit_emisor).first()
-        retenciones = Retencion.objects.filter(proveedor=proveedor).order_by("porcentaje") if proveedor else Retencion.objects.none()
-        opciones_rf = [r.porcentaje for r in retenciones] or [Decimal("0"), Decimal("2.5"), Decimal("4"), Decimal("3.5"), Decimal("11"), Decimal("1")]
-        liquidaciones.append({
-            "factura": f,
-            "subtotal": subtotal,
-            "opciones_rf": opciones_rf,
-            "opciones_ica": tarifas_ica,
-        })
+        # Opciones de retefuente por proveedor; si no hay, usar valores base.
+        retenciones = (
+            Retencion.objects.filter(proveedor=proveedor).order_by(
+                "porcentaje"
+            )
+            if proveedor
+            else Retencion.objects.none()
+        )
+        opciones_rf = [r.porcentaje for r in retenciones] or [
+            Decimal("0"),
+            Decimal("2.5"),
+            Decimal("4"),
+            Decimal("3.5"),
+            Decimal("11"),
+            Decimal("1"),
+        ]
+        liquidaciones.append(
+            {
+                "factura": f,
+                "subtotal": subtotal,
+                "opciones_rf": opciones_rf,
+                "opciones_ica": tarifas_ica,
+            }
+        )
 
-    return render(request, "procesador/dashboard.html", {
-        "form_excel": form_excel,
-        "form_zip": form_zip,
-        "facturas_xml": facturas_xml,
-        "facturas_xls": facturas_xls,
-        "liquidaciones": liquidaciones,  # <-- para la nueva pestaña
-    })
+    return render(
+        request,
+        "procesador/dashboard.html",
+        {
+            "form_excel": form_excel,
+            "form_zip": form_zip,
+            "facturas_xml": facturas_xml,
+            "facturas_xls": facturas_xls,
+            "liquidaciones": liquidaciones,
+        },
+    )
+
 
 def descargar_liquidacion_csv(request):
     """
-    Exporta un CSV simple. Por ahora acepta filtros globales opcionales:
-      ?rf=2.5&ica=8.66
-    Si no se pasan, se asume 0 para ambos (luego lo afinamos por-factura).
+    Exporta un CSV con la liquidación global.
+    Acepta parámetros GET opcionales rf e ica (porcentaje).
     """
     rf = _parse_decimal(request.GET.get("rf"), Decimal("0"))
     ica = _parse_decimal(request.GET.get("ica"), Decimal("0"))
 
     rows = []
     for f in FacturaXLS.objects.all():
-        subtotal = _parse_decimal(f.total) - _parse_decimal(f.iva) - _parse_decimal(f.inc)
+        subtotal = (
+            _parse_decimal(f.total)
+            - _parse_decimal(f.iva)
+            - _parse_decimal(f.inc)
+        )
         retefuente = (subtotal * rf) / Decimal("100")
-        reteica = (subtotal * ica) / Decimal("100")  # si luego manejas por-mil, lo cambiamos
-        total_neto = subtotal + _parse_decimal(f.iva) + _parse_decimal(f.inc) - retefuente - reteica
-        rows.append({
-            "CUFE/CUDE": f.cufe,
-            "NIT Emisor": f.nit_emisor,
-            "Nombre Emisor": f.nombre_emisor,
-            "Subtotal": f"{subtotal:.2f}",
-            "IVA": f"{_parse_decimal(f.iva):.2f}",
-            "INC": f"{_parse_decimal(f.inc):.2f}",
-            "ReteFuente(%)": f"{rf}",
-            "ReteICA(%)": f"{ica}",
-            "Total Neto": f"{total_neto:.2f}",
-        })
+        reteica = (subtotal * ica) / Decimal("100")
+        total_neto = (
+            subtotal
+            + _parse_decimal(f.iva)
+            + _parse_decimal(f.inc)
+            - retefuente
+            - reteica
+        )
+        rows.append(
+            {
+                "CUFE/CUDE": f.cufe,
+                "NIT Emisor": f.nit_emisor,
+                "Nombre Emisor": f.nombre_emisor,
+                "Subtotal": f"{subtotal:.2f}",
+                "IVA": f"{_parse_decimal(f.iva):.2f}",
+                "INC": f"{_parse_decimal(f.inc):.2f}",
+                "ReteFuente(%)": f"{rf}",
+                "ReteICA(%)": f"{ica}",
+                "Total Neto": f"{total_neto:.2f}",
+            }
+        )
 
-    # construir CSV
-    import csv, io
+    import csv
+    import io
+
     buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=list(rows[0].keys()) if rows else ["Mensaje"])
+    writer = csv.DictWriter(
+        buffer,
+        fieldnames=list(rows[0].keys()) if rows else ["Mensaje"],
+    )
     writer.writeheader()
     if rows:
         writer.writerows(rows)
     else:
         writer.writerow({"Mensaje": "Sin datos"})
-    resp = HttpResponse(buffer.getvalue(), content_type="text/csv; charset=utf-8")
-    resp["Content-Disposition"] = 'attachment; filename="liquidacion_facturas.csv"'
-    return resp
-# --- FIN NUEVO ---
+    response = HttpResponse(
+        buffer.getvalue(), content_type="text/csv; charset=utf-8"
+    )
+    response[
+        "Content-Disposition"
+    ] = 'attachment; filename="liquidacion_facturas.csv"'
+    return response

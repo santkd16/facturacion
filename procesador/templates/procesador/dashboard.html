@@ -35,19 +35,30 @@
   <hr>
 
   <div class="tabla-tabs" role="tablist" aria-label="Tablas de facturas">
-    <button type="button" role="tab" id="tab-excel" aria-controls="tabla-excel" class="active" aria-pressed="true" aria-selected="true">Facturas desde Excel</button>
-    <button type="button" role="tab" id="tab-xml" aria-controls="tabla-xml" aria-pressed="false" aria-selected="false">Facturas desde XML</button>
-    <button type="button" role="tab" id="tab-liq" aria-controls="tabla-liq" aria-pressed="false" aria-selected="false">Liquidación de facturas</button>
+    <button type="button" role="tab" id="tab-excel" aria-controls="tabla-excel"
+            class="active" aria-pressed="true" aria-selected="true">
+      Facturas desde Excel
+    </button>
+    <button type="button" role="tab" id="tab-xml" aria-controls="tabla-xml"
+            aria-pressed="false" aria-selected="false">
+      Facturas desde XML
+    </button>
+    <button type="button" role="tab" id="tab-liq" aria-controls="tabla-liq"
+            aria-pressed="false" aria-selected="false">
+      Liquidación de facturas
+    </button>
   </div>
 
   <!-- EXISTENTE: Excel -->
-  <div id="tabla-excel" class="tabla-contenido" role="tabpanel" aria-labelledby="tab-excel">
+  <div id="tabla-excel" class="tabla-contenido" role="tabpanel"
+       aria-labelledby="tab-excel">
     <h2>Facturas desde Excel</h2>
     <table>
       <thead>
         <tr>
           <th>Tipo Documento</th><th>CUFE/CUDE</th><th>Folio</th><th>Prefijo</th>
-          <th>NIT Emisor</th><th>Nombre Emisor</th><th>IVA</th><th>INC</th><th>Total</th><th>Activo (XML)</th>
+          <th>NIT Emisor</th><th>Nombre Emisor</th><th>IVA</th><th>INC</th>
+          <th>Total</th><th>Activo (XML)</th>
         </tr>
       </thead>
       <tbody>
@@ -72,12 +83,14 @@
   </div>
 
   <!-- EXISTENTE: XML -->
-  <div id="tabla-xml" class="tabla-contenido tabla-oculta" role="tabpanel" aria-labelledby="tab-xml" hidden>
+  <div id="tabla-xml" class="tabla-contenido tabla-oculta" role="tabpanel"
+       aria-labelledby="tab-xml" hidden>
     <h2>Facturas desde XML</h2>
     <table>
       <thead>
         <tr>
-          <th>CUFE</th><th>Fecha</th><th>Descripción</th><th>Subtotal</th><th>IVA</th><th>Total</th><th>Proveedor</th>
+          <th>CUFE</th><th>Fecha</th><th>Descripción</th><th>Subtotal</th>
+          <th>IVA</th><th>Total</th><th>Proveedor</th>
         </tr>
       </thead>
       <tbody>
@@ -99,7 +112,8 @@
   </div>
 
   <!-- NUEVO: LIQUIDACIÓN -->
-  <div id="tabla-liq" class="tabla-contenido tabla-oculta" role="tabpanel" aria-labelledby="tab-liq" hidden>
+  <div id="tabla-liq" class="tabla-contenido tabla-oculta" role="tabpanel"
+       aria-labelledby="tab-liq" hidden>
     <div style="display:flex; justify-content:space-between; align-items:center;">
       <h2>Liquidación de facturas</h2>
       <a href="{% url 'descargar_liquidacion' %}" style="text-decoration:none;">
@@ -111,8 +125,9 @@
       <thead>
         <tr>
           <th>CUFE/CUDE</th><th>NIT</th><th>Proveedor</th>
-          <th class="w-110">Sub total</th><th class="w-110">IVA</th><th class="w-110">INC</th>
-          <th class="w-110">ReteFuente (%)</th><th class="w-110">ReteICA (%)</th><th class="w-110">Total neto</th>
+          <th class="w-110">Sub total</th><th class="w-110">IVA</th>
+          <th class="w-110">INC</th><th class="w-110">ReteFuente (%)</th>
+          <th class="w-110">ReteICA (%)</th><th class="w-110">Total neto</th>
         </tr>
       </thead>
       <tbody id="tbody-liq">
@@ -124,7 +139,6 @@
           <td data-sub="{{ item.subtotal }}">{{ item.subtotal }}</td>
           <td data-iva="{{ item.factura.iva }}">{{ item.factura.iva }}</td>
           <td data-inc="{{ item.factura.inc }}">{{ item.factura.inc }}</td>
-
           <td>
             <select class="rf">
               {% for rf in item.opciones_rf %}
@@ -157,8 +171,10 @@
         tab.addEventListener('click', () => {
           const targetId = tab.getAttribute('aria-controls');
           tabs.forEach(btn => btn.classList.toggle('active', btn === tab));
-          panels.forEach(panel => panel.classList.toggle('tabla-oculta', panel.id !== targetId));
-          panels.forEach(panel => panel.toggleAttribute('hidden', panel.id !== targetId));
+          panels.forEach(panel => {
+            panel.classList.toggle('tabla-oculta', panel.id !== targetId);
+            panel.toggleAttribute('hidden', panel.id !== targetId);
+          });
         });
       });
     })();
@@ -171,7 +187,7 @@
       const rf = parseFloat(tr.querySelector('select.rf').value || '0') || 0;
       const ica = parseFloat(tr.querySelector('select.ica').value || '0') || 0;
       const retefuente = sub * rf / 100.0;
-      const reteica = sub * ica / 100.0; // si deseas por-mil, luego cambiamos aquí
+      const reteica = sub * ica / 100.0;
       const neto = (sub + iva + inc) - retefuente - reteica;
       tr.querySelector('.total-neto').textContent = neto.toFixed(2);
     }
