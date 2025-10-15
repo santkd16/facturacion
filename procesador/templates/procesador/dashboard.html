@@ -1,181 +1,194 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <title>Gestión Facturación</title>
-    <style>
-        .tabla-tabs {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-        }
-
-        .tabla-tabs button {
-            background-color: #f0f0f0;
-            border: 1px solid #ccc;
-            border-radius: 4px 4px 0 0;
-            padding: 0.5rem 1rem;
-            cursor: pointer;
-        }
-
-        .tabla-tabs button:focus {
-            outline: 2px solid #1d70b8;
-            outline-offset: 2px;
-        }
-
-        .tabla-tabs button[aria-pressed="true"],
-        .tabla-tabs button.active {
-            background-color: #1d70b8;
-            color: #fff;
-            border-color: #1d70b8;
-        }
-
-        .tabla-contenido {
-            border: 1px solid #ccc;
-            padding: 1rem;
-            border-radius: 0 4px 4px 4px;
-        }
-
-        .tabla-oculta {
-            display: none;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <title>Gestión Facturación</title>
+  <style>
+    .tabla-tabs { display:flex; gap:.5rem; margin-bottom:1rem; }
+    .tabla-tabs button{ background:#f0f0f0; border:1px solid #ccc; border-radius:4px 4px 0 0; padding:.5rem 1rem; cursor:pointer;}
+    .tabla-tabs button.active{ background:#1d70b8; color:#fff; border-color:#1d70b8;}
+    .tabla-contenido{ border:1px solid #ccc; padding:1rem; border-radius:0 4px 4px 4px;}
+    .tabla-oculta{ display:none; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { border:1px solid #ddd; padding:.4rem; font-size:.95rem; }
+    tfoot td { font-weight:600; }
+    .w-110{ min-width:110px; }
+  </style>
 </head>
 <body>
-    <h1>Gestión Facturación</h1>
+  <h1>Gestión Facturación</h1>
 
-    <!-- 📌 Subir Excel -->
-    <h3>Subir Excel</h3>
-    <form method="post" enctype="multipart/form-data">
-        {% csrf_token %}
-        {{ form_excel.as_p }}
-        <button type="submit" name="upload_excel">📂 Cargar Excel</button>
-    </form>
+  <h3>Subir Excel</h3>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {{ form_excel.as_p }}
+    <button type="submit" name="upload_excel">Cargar Excel</button>
+  </form>
 
-    <!-- 📌 Subir ZIP con XML -->
-    <h3>Subir ZIP con XML</h3>
-    <form method="post" enctype="multipart/form-data">
-        {% csrf_token %}
-        {{ form_zip.as_p }}
-        <button type="submit" name="upload_zip">📂 Cargar ZIP</button>
-    </form>
+  <h3>Subir ZIP con XML</h3>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {{ form_zip.as_p }}
+    <button type="submit" name="upload_zip">Cargar ZIP</button>
+  </form>
 
-    <hr>
+  <hr>
 
-    <div class="tabla-tabs" role="tablist" aria-label="Tablas de facturas">
-        <button type="button" role="tab" id="tab-excel" aria-controls="tabla-excel" aria-pressed="true" aria-selected="true" tabindex="0" class="active">📑 Facturas desde Excel</button>
-        <button type="button" role="tab" id="tab-xml" aria-controls="tabla-xml" aria-pressed="false" aria-selected="false" tabindex="-1">📑 Facturas desde XML</button>
+  <div class="tabla-tabs" role="tablist" aria-label="Tablas de facturas">
+    <button type="button" role="tab" id="tab-excel" aria-controls="tabla-excel" class="active" aria-pressed="true" aria-selected="true">Facturas desde Excel</button>
+    <button type="button" role="tab" id="tab-xml" aria-controls="tabla-xml" aria-pressed="false" aria-selected="false">Facturas desde XML</button>
+    <button type="button" role="tab" id="tab-liq" aria-controls="tabla-liq" aria-pressed="false" aria-selected="false">Liquidación de facturas</button>
+  </div>
+
+  <!-- EXISTENTE: Excel -->
+  <div id="tabla-excel" class="tabla-contenido" role="tabpanel" aria-labelledby="tab-excel">
+    <h2>Facturas desde Excel</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Tipo Documento</th><th>CUFE/CUDE</th><th>Folio</th><th>Prefijo</th>
+          <th>NIT Emisor</th><th>Nombre Emisor</th><th>IVA</th><th>INC</th><th>Total</th><th>Activo (XML)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for factura in facturas_xls %}
+        <tr>
+          <td>{{ factura.tipo_documento }}</td>
+          <td>{{ factura.cufe }}</td>
+          <td>{{ factura.folio }}</td>
+          <td>{{ factura.prefijo }}</td>
+          <td>{{ factura.nit_emisor }}</td>
+          <td>{{ factura.nombre_emisor }}</td>
+          <td>{{ factura.iva }}</td>
+          <td>{{ factura.inc }}</td>
+          <td>{{ factura.total }}</td>
+          <td>{% if factura.activo %}✅ Sí{% else %}❌ No{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="10">No hay facturas desde Excel cargadas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- EXISTENTE: XML -->
+  <div id="tabla-xml" class="tabla-contenido tabla-oculta" role="tabpanel" aria-labelledby="tab-xml" hidden>
+    <h2>Facturas desde XML</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>CUFE</th><th>Fecha</th><th>Descripción</th><th>Subtotal</th><th>IVA</th><th>Total</th><th>Proveedor</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for factura in facturas_xml %}
+        <tr>
+          <td>{{ factura.cufe }}</td>
+          <td>{{ factura.fecha }}</td>
+          <td>{{ factura.descripcion }}</td>
+          <td>{{ factura.subtotal }}</td>
+          <td>{{ factura.iva }}</td>
+          <td>{{ factura.total }}</td>
+          <td>{{ factura.proveedor.nombre }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7">No hay facturas XML cargadas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- NUEVO: LIQUIDACIÓN -->
+  <div id="tabla-liq" class="tabla-contenido tabla-oculta" role="tabpanel" aria-labelledby="tab-liq" hidden>
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2>Liquidación de facturas</h2>
+      <a href="{% url 'descargar_liquidacion' %}" style="text-decoration:none;">
+        <button type="button">Descargar CSV</button>
+      </a>
     </div>
 
-    <div id="tabla-excel" class="tabla-contenido" role="tabpanel" aria-labelledby="tab-excel" data-tab="excel" tabindex="-1">
-        <h2>📑 Facturas desde Excel</h2>
-        <table border="1" cellspacing="0" cellpadding="5">
-            <thead>
-                <tr>
-                    <th>Tipo Documento</th>
-                    <th>CUFE/CUDE</th>
-                    <th>Folio</th>
-                    <th>Prefijo</th>
-                    <th>NIT Emisor</th>
-                    <th>Nombre Emisor</th>
-                    <th>IVA</th>
-                    <th>INC</th>
-                    <th>Total</th>
-                    <th>Activo (XML)</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for factura in facturas_xls %}
-                <tr>
-                    <td>{{ factura.tipo_documento }}</td>
-                    <td>{{ factura.cufe }}</td>
-                    <td>{{ factura.folio }}</td>
-                    <td>{{ factura.prefijo }}</td>
-                    <td>{{ factura.nit_emisor }}</td>
-                    <td>{{ factura.nombre_emisor }}</td>
-                    <td>{{ factura.iva }}</td>
-                    <td>{{ factura.inc }}</td>
-                    <td>{{ factura.total }}</td>
-                    <td>{% if factura.activo %}✅ Sí{% else %}❌ No{% endif %}</td>
-                </tr>
-                {% empty %}
-                <tr>
-                    <td colspan="10">No hay facturas desde Excel cargadas.</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>CUFE/CUDE</th><th>NIT</th><th>Proveedor</th>
+          <th class="w-110">Sub total</th><th class="w-110">IVA</th><th class="w-110">INC</th>
+          <th class="w-110">ReteFuente (%)</th><th class="w-110">ReteICA (%)</th><th class="w-110">Total neto</th>
+        </tr>
+      </thead>
+      <tbody id="tbody-liq">
+        {% for item in liquidaciones %}
+        <tr>
+          <td data-cufe>{{ item.factura.cufe }}</td>
+          <td>{{ item.factura.nit_emisor }}</td>
+          <td>{{ item.factura.nombre_emisor }}</td>
+          <td data-sub="{{ item.subtotal }}">{{ item.subtotal }}</td>
+          <td data-iva="{{ item.factura.iva }}">{{ item.factura.iva }}</td>
+          <td data-inc="{{ item.factura.inc }}">{{ item.factura.inc }}</td>
 
-    <div id="tabla-xml" class="tabla-contenido tabla-oculta" role="tabpanel" aria-labelledby="tab-xml" data-tab="xml" tabindex="-1" hidden>
-        <h2>📑 Facturas desde XML</h2>
-        <table border="1" cellspacing="0" cellpadding="5">
-            <thead>
-                <tr>
-                    <th>CUFE</th>
-                    <th>Fecha</th>
-                    <th>Descripción</th>
-                    <th>Subtotal</th>
-                    <th>IVA</th>
-                    <th>Total</th>
-                    <th>Proveedor </th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for factura in facturas_xml %}
-                <tr>
-                    <td>{{ factura.cufe }}</td>
-                    <td>{{ factura.fecha }}</td>
-                    <td>{{ factura.descripcion }}</td>
-                    <td>{{ factura.subtotal }}</td>
-                    <td>{{ factura.iva }}</td>
-                    <td>{{ factura.total }}</td>
-                    <td>{{ factura.proveedor.nombre }}</td>
-                </tr>
-                {% empty %}
-                <tr>
-                    <td colspan="7">No hay facturas XML cargadas.</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+          <td>
+            <select class="rf">
+              {% for rf in item.opciones_rf %}
+              <option value="{{ rf }}">{{ rf }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <select class="ica">
+              {% for ica in item.opciones_ica %}
+              <option value="{{ ica }}">{{ ica }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td class="total-neto">0.00</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="9">No hay datos para liquidación.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
-    <script>
-        (function () {
-            const tabs = document.querySelectorAll('.tabla-tabs button');
-            const panels = document.querySelectorAll('.tabla-contenido');
+  <script>
+    // Tabs simples
+    (function () {
+      const tabs = document.querySelectorAll('.tabla-tabs button');
+      const panels = document.querySelectorAll('.tabla-contenido');
+      tabs.forEach((tab) => {
+        tab.addEventListener('click', () => {
+          const targetId = tab.getAttribute('aria-controls');
+          tabs.forEach(btn => btn.classList.toggle('active', btn === tab));
+          panels.forEach(panel => panel.classList.toggle('tabla-oculta', panel.id !== targetId));
+          panels.forEach(panel => panel.toggleAttribute('hidden', panel.id !== targetId));
+        });
+      });
+    })();
 
-            tabs.forEach((tab) => {
-                tab.addEventListener('click', () => {
-                    const targetId = tab.getAttribute('aria-controls');
+    // Cálculo Total Neto = subtotal + iva + inc - (subtotal*rf/100) - (subtotal*ica/100)
+    function recalcularFila(tr) {
+      const sub = parseFloat(tr.querySelector('[data-sub]').dataset.sub || '0') || 0;
+      const iva = parseFloat(tr.querySelector('[data-iva]').dataset.iva || '0') || 0;
+      const inc = parseFloat(tr.querySelector('[data-inc]').dataset.inc || '0') || 0;
+      const rf = parseFloat(tr.querySelector('select.rf').value || '0') || 0;
+      const ica = parseFloat(tr.querySelector('select.ica').value || '0') || 0;
+      const retefuente = sub * rf / 100.0;
+      const reteica = sub * ica / 100.0; // si deseas por-mil, luego cambiamos aquí
+      const neto = (sub + iva + inc) - retefuente - reteica;
+      tr.querySelector('.total-neto').textContent = neto.toFixed(2);
+    }
 
-                    tabs.forEach((btn) => {
-                        const isActive = btn === tab;
-                        btn.classList.toggle('active', isActive);
-                        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-                        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
-                        btn.setAttribute('tabindex', isActive ? '0' : '-1');
-                    });
+    function recalcularTodo() {
+      document.querySelectorAll('#tbody-liq tr').forEach(recalcularFila);
+    }
 
-                    panels.forEach((panel) => {
-                        const isTarget = panel.id === targetId;
-                        panel.classList.toggle('tabla-oculta', !isTarget);
-                        panel.toggleAttribute('hidden', !isTarget);
-                    });
+    document.addEventListener('change', (e) => {
+      if (e.target.closest('#tbody-liq select')) {
+        const tr = e.target.closest('tr');
+        recalcularFila(tr);
+      }
+    });
 
-                    const targetPanel = document.getElementById(targetId);
-                    if (targetPanel) {
-                        try {
-                            targetPanel.focus({ preventScroll: true });
-                        } catch (error) {
-                            targetPanel.focus();
-                        }
-                    }
-                });
-            });
-        })();
-    </script>
-
+    // Recalcular al cargar
+    window.addEventListener('DOMContentLoaded', recalcularTodo);
+  </script>
 </body>
 </html>

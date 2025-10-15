@@ -46,3 +46,25 @@ class CuentaContable(models.Model):
 
     def __str__(self):
         return f"{self.codigo} - {self.descripcion}"
+
+# --- NUEVO: Retenciones y tarifas ICA ---
+class Retencion(models.Model):
+    proveedor = models.ForeignKey(Proveedor, on_delete=models.CASCADE, related_name="retenciones")
+    porcentaje = models.DecimalField(max_digits=5, decimal_places=2)  # ej: 2.50 = 2.5%
+    cuenta_contable = models.ForeignKey(CuentaContable, on_delete=models.PROTECT)
+
+    class Meta:
+        unique_together = ("proveedor", "porcentaje")
+
+    def __str__(self):
+        return f"RF {self.porcentaje}% - {self.proveedor.nombre}"
+
+class TarifaICA(models.Model):
+    valor = models.DecimalField(max_digits=5, decimal_places=2)  # ej: 8.66
+    descripcion = models.CharField(max_length=100, blank=True, default="")
+
+    class Meta:
+        unique_together = ("valor", "descripcion")
+
+    def __str__(self):
+        return f"ICA {self.valor}% {self.descripcion}".strip()
