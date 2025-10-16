@@ -7,6 +7,8 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import xml.etree.ElementTree as ET
 import pandas as pd
+from django.db import connection
+from django.db.utils import DatabaseError, ProgrammingError
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.utils.dateparse import parse_date
@@ -101,6 +103,33 @@ def _extract_fecha_xls(row) -> date | None:
     return None
 
 
+def ensure_fecha_documento_column() -> None:
+    """Garantiza que la columna ``fecha_documento`` exista antes de usarla."""
+
+    tabla = FacturaXLS._meta.db_table
+    try:
+        with connection.cursor() as cursor:
+            descripcion = connection.introspection.get_table_description(
+                cursor, tabla
+            )
+    except (ProgrammingError, DatabaseError):  # pragma: no cover
+        return
+
+    if any(col.name == "fecha_documento" for col in descripcion):
+        return
+
+    from django.db import models
+
+    campo = models.DateField(blank=True, null=True)
+    campo.set_attributes_from_name("fecha_documento")
+    try:
+        with connection.schema_editor() as editor:
+            editor.add_field(FacturaXLS, campo)
+    except Exception:
+        # Si otro proceso ya la creó evitamos propagar el error.
+        return
+
+
 def sincronizar_estado_facturas_xls():
     xml_cufes = set(FacturaXML.objects.values_list("cufe", flat=True))
     actualizar = []
@@ -163,6 +192,7 @@ def procesar_xml(ruta_xml: str) -> None:
 
 def dashboard(request):
     """Vista principal del tablero de facturación."""
+    ensure_fecha_documento_column()
     if request.method == "POST":
         # Subir Excel
         if "upload_excel" in request.POST:
@@ -252,7 +282,6 @@ def dashboard(request):
             - _parse_decimal(f.iva)
             - _parse_decimal(f.inc)
         )
-        
         factura_xml = facturas_xml_map.get(f.cufe)
         proveedor = factura_xml.proveedor if factura_xml else None
         nit = f.nit_emisor or (proveedor.nit if proveedor else "")
@@ -262,7 +291,6 @@ def dashboard(request):
         fecha_excel = f.fecha_documento
         fecha_xml = factura_xml.fecha if factura_xml else None
         fecha = fecha_excel if fecha_excel is not None else None
-        fecha = factura_xml.fecha if factura_xml else None
         descripcion = factura_xml.descripcion if factura_xml else ""
         coincide_xml = factura_xml is not None
         descripcion_display = descripcion if coincide_xml else "Sin coincidencia XML"
@@ -330,6 +358,8 @@ def descargar_liquidacion_csv(request):
     los valores por defecto sin aplicar retenciones.
     """
 
+    ensure_fecha_documento_column()
+
     import csv
     import io
 
@@ -392,7 +422,6 @@ def descargar_liquidacion_csv(request):
                 if factura.fecha_documento
                 else ""
             )
-            fecha = factura_xml.fecha.isoformat() if factura_xml else ""
             descripcion = factura_xml.descripcion if factura_xml else ""
             if factura.prefijo and factura.folio:
                 prefijo_folio = f"{factura.prefijo}-{factura.folio}"
