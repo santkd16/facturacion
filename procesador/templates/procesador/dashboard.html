@@ -116,47 +116,72 @@
        aria-labelledby="tab-liq" hidden>
     <div style="display:flex; justify-content:space-between; align-items:center;">
       <h2>Liquidación de facturas</h2>
-      <a href="{% url 'descargar_liquidacion' %}" style="text-decoration:none;">
-        <button type="button">Descargar CSV</button>
-      </a>
+      <form id="form-liq" method="post" action="{% url 'descargar_liquidacion' %}">
+        {% csrf_token %}
+        <input type="hidden" name="rows_json" id="rows-json" value="[]">
+        <button type="submit">Descargar CSV</button>
+      </form>
     </div>
 
     <table>
       <thead>
         <tr>
-          <th>CUFE/CUDE</th><th>NIT</th><th>Proveedor</th>
+          <th>Tipo documento</th><th>CUFE/CUDE</th><th>NIT</th><th>Proveedor</th>
+          <th>Fecha</th><th>Descripción</th><th>Prefijo + Folio</th>
           <th class="w-110">Sub total</th><th class="w-110">IVA</th>
           <th class="w-110">INC</th><th class="w-110">ReteFuente (%)</th>
-          <th class="w-110">ReteICA (%)</th><th class="w-110">Total neto</th>
+          <th class="w-110">ReteFuente</th><th class="w-110">ReteICA (%)</th>
+          <th class="w-110">ReteICA</th><th class="w-110">Total neto</th>
         </tr>
       </thead>
       <tbody id="tbody-liq">
         {% for item in liquidaciones %}
-        <tr>
-          <td data-cufe>{{ item.factura.cufe }}</td>
-          <td>{{ item.factura.nit_emisor }}</td>
-          <td>{{ item.factura.nombre_emisor }}</td>
-          <td data-sub="{{ item.subtotal }}">{{ item.subtotal }}</td>
-          <td data-iva="{{ item.factura.iva }}">{{ item.factura.iva }}</td>
-          <td data-inc="{{ item.factura.inc }}">{{ item.factura.inc }}</td>
+        <tr
+          data-tipo-documento="{{ item.factura.tipo_documento }}"
+          data-cufe="{{ item.factura.cufe }}"
+          data-nit="{{ item.nit }}"
+          data-proveedor="{{ item.proveedor_nombre }}"
+          data-fecha="{{ item.fecha|date:'Y-m-d' }}"
+          data-prefijo-folio="{{ item.prefijo_folio }}"
+          data-descripcion="{{ item.descripcion|default:'' }}"
+          data-coincide-xml="{{ item.coincide_xml|yesno:'si,no' }}"
+        >
+          <td>{{ item.factura.tipo_documento }}</td>
+          <td>{{ item.factura.cufe }}</td>
+          <td>{{ item.nit }}</td>
+          <td>{{ item.proveedor_nombre }}</td>
+          <td>{{ item.fecha|date:"Y-m-d" }}</td>
+          <td>
+            {% if item.coincide_xml %}
+              {{ item.descripcion_display }}
+            {% else %}
+              <span style="color:#c00; font-weight:600;">{{ item.descripcion_display }}</span>
+            {% endif %}
+          </td>
+          <td>{{ item.prefijo_folio }}</td>
+          <td data-sub="{{ item.subtotal }}">{{ item.subtotal|floatformat:2 }}</td>
+          <td data-iva="{{ item.factura.iva }}">{{ item.factura.iva|floatformat:2 }}</td>
+          <td data-inc="{{ item.factura.inc }}">{{ item.factura.inc|floatformat:2 }}</td>
           <td>
             <select class="rf">
               {% for rf in item.opciones_rf %}
-              <option value="{{ rf }}">{{ rf }}</option>
+              <option value="{{ rf }}" {% if rf == item.retefuente_default %}selected{% endif %}>{{ rf }}</option>
               {% endfor %}
             </select>
           </td>
+          <td class="retefuente-valor">0.00</td>
           <td>
             <select class="ica">
               {% for ica in item.opciones_ica %}
-              <option value="{{ ica }}">{{ ica }}</option>
+              <option value="{{ ica }}" {% if ica == item.reteica_default %}selected{% endif %}>{{ ica }}</option>
               {% endfor %}
             </select>
           </td>
+          <td class="reteica-valor">0.00</td>
           <td class="total-neto">0.00</td>
         </tr>
         {% empty %}
-        <tr><td colspan="9">No hay datos para liquidación.</td></tr>
+        <tr><td colspan="14">No hay datos para liquidación.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -189,6 +214,14 @@
       const retefuente = sub * rf / 100.0;
       const reteica = sub * ica / 100.0;
       const neto = (sub + iva + inc) - retefuente - reteica;
+      const rfCell = tr.querySelector('.retefuente-valor');
+      const icaCell = tr.querySelector('.reteica-valor');
+      if (rfCell) {
+        rfCell.textContent = retefuente.toFixed(2);
+      }
+      if (icaCell) {
+        icaCell.textContent = reteica.toFixed(2);
+      }
       tr.querySelector('.total-neto').textContent = neto.toFixed(2);
     }
 
@@ -202,6 +235,49 @@
         recalcularFila(tr);
       }
     });
+
+    const formLiq = document.getElementById('form-liq');
+    if (formLiq) {
+      formLiq.addEventListener('submit', () => {
+        const rows = [];
+        document.querySelectorAll('#tbody-liq tr').forEach((tr) => {
+          const subCell = tr.querySelector('[data-sub]');
+          const ivaCell = tr.querySelector('[data-iva]');
+          const incCell = tr.querySelector('[data-inc]');
+          const rfSelect = tr.querySelector('select.rf');
+          const icaSelect = tr.querySelector('select.ica');
+          const sub = parseFloat(subCell ? subCell.dataset.sub || '0' : '0') || 0;
+          const iva = parseFloat(ivaCell ? ivaCell.dataset.iva || '0' : '0') || 0;
+          const inc = parseFloat(incCell ? incCell.dataset.inc || '0' : '0') || 0;
+          const rfPct = parseFloat(rfSelect ? rfSelect.value || '0' : '0') || 0;
+          const icaPct = parseFloat(icaSelect ? icaSelect.value || '0' : '0') || 0;
+          const retefuente = sub * rfPct / 100.0;
+          const reteica = sub * icaPct / 100.0;
+          const totalNeto = (sub + iva + inc) - retefuente - reteica;
+          rows.push({
+            tipo_documento: tr.dataset.tipoDocumento || '',
+            cufe: tr.dataset.cufe || '',
+            nit: tr.dataset.nit || '',
+            proveedor: tr.dataset.proveedor || '',
+            fecha: tr.dataset.fecha || '',
+            descripcion: tr.dataset.descripcion || '',
+            prefijo_folio: tr.dataset.prefijoFolio || '',
+            subtotal: sub.toFixed(2),
+            iva: iva.toFixed(2),
+            inc: inc.toFixed(2),
+            retefuente_pct: rfPct.toFixed(2),
+            reteica_pct: icaPct.toFixed(2),
+            retefuente: retefuente.toFixed(2),
+            reteica: reteica.toFixed(2),
+            total_neto: totalNeto.toFixed(2),
+          });
+        });
+        const hiddenInput = document.getElementById('rows-json');
+        if (hiddenInput) {
+          hiddenInput.value = JSON.stringify(rows);
+        }
+      });
+    }
 
     // Recalcular al cargar
     window.addEventListener('DOMContentLoaded', recalcularTodo);
