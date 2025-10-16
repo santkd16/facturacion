@@ -290,7 +290,11 @@ def dashboard(request):
         )
         fecha_excel = f.fecha_documento
         fecha_xml = factura_xml.fecha if factura_xml else None
-        fecha = fecha_excel if fecha_excel is not None else None
+coincide_xml = factura_xml is not None
+if fecha_excel and coincide_xml:
+    fecha = fecha_excel.strftime("%Y-%m-%d")
+else:
+    fecha = ""
         descripcion = factura_xml.descripcion if factura_xml else ""
         coincide_xml = factura_xml is not None
         descripcion_display = descripcion if coincide_xml else "Sin coincidencia XML"

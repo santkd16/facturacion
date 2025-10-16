@@ -57,8 +57,8 @@
       <thead>
         <tr>
           <th>Tipo Documento</th><th>CUFE/CUDE</th><th>Folio</th><th>Prefijo</th>
-          <th>NIT Emisor</th><th>Nombre Emisor</th><th>IVA</th><th>INC</th>
-          <th>Total</th><th>Activo (XML)</th>
+          <th>NIT Emisor</th><th>Nombre Emisor</th><th>Fecha documento</th>
+          <th>IVA</th><th>INC</th><th>Total</th><th>Activo (XML)</th>
         </tr>
       </thead>
       <tbody>
@@ -70,13 +70,14 @@
           <td>{{ factura.prefijo }}</td>
           <td>{{ factura.nit_emisor }}</td>
           <td>{{ factura.nombre_emisor }}</td>
+          <td>{{ factura.fecha_documento|date:'Y-m-d' }}</td>
           <td>{{ factura.iva }}</td>
           <td>{{ factura.inc }}</td>
           <td>{{ factura.total }}</td>
           <td>{% if factura.activo %}✅ Sí{% else %}❌ No{% endif %}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="10">No hay facturas desde Excel cargadas.</td></tr>
+        <tr><td colspan="11">No hay facturas desde Excel cargadas.</td></tr>
         {% endfor %}
       </tbody>
     </table>
