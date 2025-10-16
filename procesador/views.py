@@ -267,10 +267,10 @@ def dashboard(request):
     )
     if not tarifas_ica:
         tarifas_ica = [
-            Decimal("4.14"),
-            Decimal("8.66"),
-            Decimal("9.66"),
-            Decimal("13.8"),
+            Decimal("0.414"),
+            Decimal("0.866"),
+            Decimal("0.966"),
+            Decimal("1.38"),
         ]
     if Decimal("0") not in tarifas_ica:
         tarifas_ica.insert(0, Decimal("0"))
