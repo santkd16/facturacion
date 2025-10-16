@@ -290,13 +290,10 @@ def dashboard(request):
         )
         fecha_excel = f.fecha_documento
         fecha_xml = factura_xml.fecha if factura_xml else None
-coincide_xml = factura_xml is not None
-if fecha_excel and coincide_xml:
-    fecha = fecha_excel.strftime("%Y-%m-%d")
-else:
-    fecha = ""
-        descripcion = factura_xml.descripcion if factura_xml else ""
         coincide_xml = factura_xml is not None
+        fecha_excel_str = fecha_excel.strftime("%Y-%m-%d") if fecha_excel else ""
+        fecha = fecha_excel_str
+        descripcion = factura_xml.descripcion if factura_xml else ""
         descripcion_display = descripcion if coincide_xml else "Sin coincidencia XML"
         if f.prefijo and f.folio:
             prefijo_folio = f"{f.prefijo}-{f.folio}"
@@ -332,6 +329,7 @@ else:
                 "proveedor_nombre": proveedor_nombre,
                 "fecha_excel": fecha_excel,
                 "fecha_xml": fecha_xml,
+                "fecha_excel_str": fecha_excel_str,
                 "fecha": fecha,
                 "prefijo_folio": prefijo_folio,
                 "descripcion": descripcion,
