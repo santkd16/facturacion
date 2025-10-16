@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import zipfile
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import xml.etree.ElementTree as ET
 import pandas as pd
@@ -44,6 +45,60 @@ def _parse_decimal(value, default: Decimal = Decimal("0")) -> Decimal:
         return Decimal(cleaned)
     except (InvalidOperation, TypeError):
         return default
+
+
+def _coerce_fecha(value) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, pd.Timestamp):
+        if pd.isna(value):
+            return None
+        return value.date()
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        parsed = parse_date(cleaned)
+        if parsed is not None:
+            return parsed
+        try:
+            ts = pd.to_datetime(cleaned, errors="coerce")
+        except Exception:
+            ts = pd.NaT
+        if not pd.isna(ts):
+            return ts.date()
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            ts = pd.to_datetime(value, errors="coerce")
+        except Exception:
+            ts = pd.NaT
+        if not pd.isna(ts):
+            return ts.date()
+    return None
+
+
+def _extract_fecha_xls(row) -> date | None:
+    """Intenta obtener la fecha del documento desde una fila de Excel."""
+
+    keys: list[str] = []
+    if hasattr(row, "index"):
+        keys = [k for k in row.index if isinstance(k, str)]
+    elif isinstance(row, dict):
+        keys = [k for k in row.keys() if isinstance(k, str)]
+
+    for key in keys:
+        if "fecha" not in key.lower():
+            continue
+        value = row.get(key)
+        fecha = _coerce_fecha(value)
+        if fecha is not None:
+            return fecha
+    return None
 
 
 def sincronizar_estado_facturas_xls():
@@ -121,6 +176,7 @@ def dashboard(request):
                         "Documento soporte con no obligados",
                         "Nota de crédito electrónica",
                     ]:
+                        fecha_excel = _extract_fecha_xls(row)
                         factura, _ = FacturaXLS.objects.get_or_create(
                             cufe=row["CUFE/CUDE"],
                             defaults={
@@ -129,11 +185,14 @@ def dashboard(request):
                                 "prefijo": row.get("Prefijo"),
                                 "nit_emisor": row.get("NIT Emisor"),
                                 "nombre_emisor": row.get("Nombre Emisor"),
+                                "fecha_documento": fecha_excel,
                                 "iva": row.get("IVA", 0) or 0,
                                 "inc": row.get("INC", 0) or 0,
                                 "total": row.get("Total", 0) or 0,
                             },
                         )
+                        if fecha_excel is not None:
+                            factura.fecha_documento = fecha_excel
                         factura.activo = FacturaXML.objects.filter(
                             cufe=factura.cufe
                         ).exists()
@@ -200,6 +259,9 @@ def dashboard(request):
         proveedor_nombre = (
             f.nombre_emisor or (proveedor.nombre if proveedor else "")
         )
+        fecha_excel = f.fecha_documento
+        fecha_xml = factura_xml.fecha if factura_xml else None
+        fecha = fecha_excel if fecha_excel is not None else None
         fecha = factura_xml.fecha if factura_xml else None
         descripcion = factura_xml.descripcion if factura_xml else ""
         coincide_xml = factura_xml is not None
@@ -236,6 +298,8 @@ def dashboard(request):
                 "reteica_default": ica_por_defecto,
                 "nit": nit,
                 "proveedor_nombre": proveedor_nombre,
+                "fecha_excel": fecha_excel,
+                "fecha_xml": fecha_xml,
                 "fecha": fecha,
                 "prefijo_folio": prefijo_folio,
                 "descripcion": descripcion,
@@ -322,6 +386,11 @@ def descargar_liquidacion_csv(request):
             )
             proveedor = factura.nombre_emisor or (
                 factura_xml.proveedor.nombre if factura_xml else ""
+            )
+            fecha = (
+                factura.fecha_documento.isoformat()
+                if factura.fecha_documento
+                else ""
             )
             fecha = factura_xml.fecha.isoformat() if factura_xml else ""
             descripcion = factura_xml.descripcion if factura_xml else ""
