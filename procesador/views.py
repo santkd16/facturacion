@@ -290,13 +290,9 @@ def dashboard(request):
         )
         fecha_excel = f.fecha_documento
         fecha_xml = factura_xml.fecha if factura_xml else None
-        coincide_xml = factura_xml is not None
-        if fecha_excel and coincide_xml:
-            fecha_excel_str = fecha_excel.isoformat()
-        else:
-            fecha_excel_str = ""
-        fecha = fecha_excel_str
+        fecha = fecha_excel if fecha_excel is not None else None
         descripcion = factura_xml.descripcion if factura_xml else ""
+        coincide_xml = factura_xml is not None
         descripcion_display = descripcion if coincide_xml else "Sin coincidencia XML"
         if f.prefijo and f.folio:
             prefijo_folio = f"{f.prefijo}-{f.folio}"
@@ -332,7 +328,6 @@ def dashboard(request):
                 "proveedor_nombre": proveedor_nombre,
                 "fecha_excel": fecha_excel,
                 "fecha_xml": fecha_xml,
-                "fecha_excel_str": fecha_excel_str,
                 "fecha": fecha,
                 "prefijo_folio": prefijo_folio,
                 "descripcion": descripcion,
@@ -424,7 +419,7 @@ def descargar_liquidacion_csv(request):
             )
             fecha = (
                 factura.fecha_documento.isoformat()
-                if factura.fecha_documento and factura_xml
+                if factura.fecha_documento
                 else ""
             )
             descripcion = factura_xml.descripcion if factura_xml else ""
