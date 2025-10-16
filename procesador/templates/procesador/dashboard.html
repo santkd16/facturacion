@@ -143,6 +143,7 @@
           data-proveedor="{{ item.proveedor_nombre }}"
           data-fecha="{{ item.fecha_excel|date:'Y-m-d' }}"
           data-fecha-xml="{{ item.fecha_xml|date:'Y-m-d' }}"
+          data-fecha="{{ item.fecha|date:'Y-m-d' }}"
           data-prefijo-folio="{{ item.prefijo_folio }}"
           data-descripcion="{{ item.descripcion|default:'' }}"
           data-coincide-xml="{{ item.coincide_xml|yesno:'si,no' }}"
@@ -152,6 +153,7 @@
           <td>{{ item.nit }}</td>
           <td>{{ item.proveedor_nombre }}</td>
           <td>{{ item.fecha_excel|date:"Y-m-d" }}</td>
+          <td>{{ item.fecha|date:"Y-m-d" }}</td>
           <td>
             {% if item.coincide_xml %}
               {{ item.descripcion_display }}

@@ -237,10 +237,10 @@ def dashboard(request):
     )
     if not tarifas_ica:
         tarifas_ica = [
-            Decimal("4.14"),
-            Decimal("8.66"),
-            Decimal("9.66"),
-            Decimal("13.8"),
+            Decimal("0.414"),
+            Decimal("0.866"),
+            Decimal("0.966"),
+            Decimal("1.38"),
         ]
     if Decimal("0") not in tarifas_ica:
         tarifas_ica.insert(0, Decimal("0"))
@@ -252,6 +252,7 @@ def dashboard(request):
             - _parse_decimal(f.iva)
             - _parse_decimal(f.inc)
         )
+        
         factura_xml = facturas_xml_map.get(f.cufe)
         proveedor = factura_xml.proveedor if factura_xml else None
         nit = f.nit_emisor or (proveedor.nit if proveedor else "")
@@ -261,6 +262,7 @@ def dashboard(request):
         fecha_excel = f.fecha_documento
         fecha_xml = factura_xml.fecha if factura_xml else None
         fecha = fecha_excel if fecha_excel is not None else None
+        fecha = factura_xml.fecha if factura_xml else None
         descripcion = factura_xml.descripcion if factura_xml else ""
         coincide_xml = factura_xml is not None
         descripcion_display = descripcion if coincide_xml else "Sin coincidencia XML"
@@ -390,6 +392,7 @@ def descargar_liquidacion_csv(request):
                 if factura.fecha_documento
                 else ""
             )
+            fecha = factura_xml.fecha.isoformat() if factura_xml else ""
             descripcion = factura_xml.descripcion if factura_xml else ""
             if factura.prefijo and factura.folio:
                 prefijo_folio = f"{factura.prefijo}-{factura.folio}"
