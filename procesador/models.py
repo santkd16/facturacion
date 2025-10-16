@@ -28,6 +28,7 @@ class FacturaXLS(models.Model):
     prefijo = models.CharField(max_length=50, blank=True, null=True)
     nit_emisor = models.CharField(max_length=50, blank=True, null=True)
     nombre_emisor = models.CharField(max_length=255, blank=True, null=True)
+    fecha_documento = models.DateField(blank=True, null=True)
     iva = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     inc = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
