@@ -225,6 +225,48 @@ class DashboardUploadZipTests(TestCase):
         self.assertTrue(factura_xls.activo)
 
 
+class DashboardFechaExcelTests(TestCase):
+    def setUp(self):
+        self.proveedor = Proveedor.objects.create(
+            nit="901112223", nombre="Proveedor Fecha"
+        )
+
+        self.factura_xml = FacturaXML.objects.create(
+            cufe="FECHA-1",
+            fecha=date(2024, 4, 30),
+            descripcion="Factura con fecha",
+            subtotal=Decimal("100.00"),
+            iva=Decimal("19.00"),
+            total=Decimal("119.00"),
+            proveedor=self.proveedor,
+        )
+
+        FacturaXLS.objects.create(
+            tipo_documento="Factura electrónica",
+            cufe="FECHA-1",
+            folio="123",
+            prefijo="PX",
+            nit_emisor="901112223",
+            nombre_emisor="Proveedor Fecha",
+            fecha_documento=date(2024, 5, 2),
+            iva=Decimal("19.00"),
+            inc=Decimal("0.00"),
+            total=Decimal("119.00"),
+            activo=True,
+        )
+
+    def test_fecha_excel_visible_en_dashboard_y_liquidacion(self):
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+
+        contenido = response.content.decode("utf-8")
+
+        # La fecha debe aparecer en la tabla de Excel.
+        self.assertIn(">2024-05-02<", contenido)
+
+        # Y también debe serializarse para la liquidación cuando coincide el CUFE.
+        self.assertIn('data-fecha="2024-05-02"', contenido)
+
 class DescargarLiquidacionCSVTests(TestCase):
     def setUp(self):
         self.proveedor = Proveedor.objects.create(
