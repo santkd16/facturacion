@@ -570,18 +570,39 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
         mensajes = " ".join(error["mensaje"] for error in data["errores"])
         self.assertIn("La cuenta seleccionada no pertenece al proveedor", mensajes)
 
-    def test_error_por_falta_parametrizacion_retefuente(self):
+    def test_validacion_sin_parametrizacion_retencion_devuelve_na(self):
         self.parametros["RETEFUENTE"].delete()
         fila = self.build_fila_payload()
+        fila["cuentas"]["retefuente"] = None
         response = self.client.post(
             reverse("liquidacion_validar"),
             data=json.dumps({"filas": [fila]}),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200)
         data = response.json()
-        mensajes = " ".join(error["mensaje"] for error in data["errores"])
-        self.assertIn("El proveedor no tiene parametrizadas opciones para ReteFuente", mensajes)
+        self.assertTrue(data["valido"])
+        self.assertEqual(len(data["errores"]), 0)
+        resultado = data["filas"][0]
+        self.assertIsNone(resultado["cuentas"].get("retefuente"))
+        self.assertTrue(resultado["listo"])
+
+    def test_validacion_sin_parametrizacion_valor_fijo_devuelve_na(self):
+        self.parametros["IVA"].delete()
+        fila = self.build_fila_payload()
+        fila["cuentas"]["iva"] = None
+        response = self.client.post(
+            reverse("liquidacion_validar"),
+            data=json.dumps({"filas": [fila]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["valido"])
+        self.assertEqual(len(data["errores"]), 0)
+        resultado = data["filas"][0]
+        self.assertIsNone(resultado["cuentas"].get("iva"))
+        self.assertTrue(resultado["listo"])
 
 
 class LiquidacionExportarTests(LiquidacionTestBase):

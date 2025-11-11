@@ -368,6 +368,8 @@
     })();
 
     const CSRF_TOKEN = '{{ csrf_token }}';
+    const NA_OPTION_VALUE = '__NA__';
+
     const CASILLA_KEYS = {
       SUBTOTAL: 'subtotales',
       IVA: 'iva',
@@ -414,8 +416,11 @@
         if (!td) return;
         const casilla = select.dataset.casilla;
         if (td.dataset.sinOpciones === 'true') {
+          if (select.value && select.value !== NA_OPTION_VALUE) {
+            select.dataset.valorAnterior = select.value;
+          }
           select.disabled = true;
-          select.value = '';
+          select.value = NA_OPTION_VALUE;
           td.dataset.mensajeAuto = 'sin_opciones';
           establecerMensajeCampo(td, 'Proveedor sin parametrización. Cuenta contable = N/A.');
           return;
@@ -424,9 +429,10 @@
         if (CASILLAS_VALOR_FIJO.includes(casilla)) {
           const valor = mapaValores[casilla];
           if (esCero(valor)) {
-            if (select.value) {
-              select.value = '';
+            if (select.value && select.value !== NA_OPTION_VALUE) {
+              select.dataset.valorAnterior = select.value;
             }
+            select.value = NA_OPTION_VALUE;
             select.disabled = true;
             td.dataset.mensajeAuto = 'valor_cero';
             establecerMensajeCampo(td, 'Valor en 0 → Cuenta contable = N/A.');
@@ -437,6 +443,15 @@
             establecerMensajeCampo(td, '');
             td.dataset.mensajeAuto = '';
           }
+          if (select.value === NA_OPTION_VALUE) {
+            const previo = select.dataset.valorAnterior || '';
+            if (previo && select.querySelector(`option[value="${previo}"]`)) {
+              select.value = previo;
+            } else {
+              select.value = '';
+            }
+          }
+          delete select.dataset.valorAnterior;
           return;
         }
 
@@ -549,12 +564,22 @@
     function poblarSelect(select, opciones, casilla) {
       const td = select.closest('td');
       establecerMensajeCampo(td, '');
-      const valorAnterior = select.value;
-      select.innerHTML = '<option value="">Seleccione cuenta</option>';
+      const valorAnterior = select.value || '';
+      select.innerHTML = '';
+      const opcionSeleccione = document.createElement('option');
+      opcionSeleccione.value = '';
+      opcionSeleccione.textContent = 'Seleccione cuenta';
+      select.appendChild(opcionSeleccione);
+      const opcionNA = document.createElement('option');
+      opcionNA.value = NA_OPTION_VALUE;
+      opcionNA.textContent = 'N/A';
+      opcionNA.dataset.na = 'true';
+      select.appendChild(opcionNA);
       if (!opciones || !opciones.length) {
         td.dataset.sinOpciones = 'true';
         td.dataset.mensajeAuto = 'sin_opciones';
         select.disabled = true;
+        select.value = NA_OPTION_VALUE;
         establecerMensajeCampo(td, 'Proveedor sin parametrización. Cuenta contable = N/A.');
         return;
       }
@@ -579,8 +604,10 @@
         select.value = opciones[0].id;
         td.dataset.mensajeAuto = 'auto';
         establecerMensajeCampo(td, 'Seleccionado automáticamente por única opción.');
-      } else if (valorAnterior) {
+      } else if (valorAnterior && select.querySelector(`option[value="${valorAnterior}"]`)) {
         select.value = valorAnterior;
+      } else if (valorAnterior === NA_OPTION_VALUE) {
+        select.value = NA_OPTION_VALUE;
       }
     }
 
@@ -590,6 +617,7 @@
       if (!proveedorId) {
         selects.forEach((select) => {
           select.disabled = true;
+          select.value = NA_OPTION_VALUE;
           const td = select.closest('td');
           if (td) {
             td.dataset.sinOpciones = 'true';
@@ -634,6 +662,16 @@
       }
     });
 
+    function obtenerValorCuenta(select) {
+      if (!select) return null;
+      const valor = select.value;
+      if (!valor || valor === NA_OPTION_VALUE) {
+        return null;
+      }
+      const numero = Number(valor);
+      return Number.isFinite(numero) ? numero : null;
+    }
+
     function recolectarFilas() {
       const filas = [];
       document.querySelectorAll('#tbody-liq tr').forEach((tr) => {
@@ -663,7 +701,7 @@
           const valor = casilla === 'TOTAL_NETO' ? totales.totalNeto : Number(tr.dataset[campo.replace('_', '')] || totales[campo]);
           fila.importes[campo] = formatearNumero(valor, 2);
           const select = tr.querySelector(`select[data-casilla="${casilla}"]`);
-          fila.cuentas[campo] = select && select.value ? Number(select.value) : null;
+          fila.cuentas[campo] = obtenerValorCuenta(select);
         });
         ['RETEFUENTE', 'RETEICA', 'RETEIVA'].forEach((casilla) => {
           const campo = CASILLA_FIELD_MAP[casilla];
@@ -672,7 +710,7 @@
           const valorEl = tr.querySelector(`.valor-retencion[data-casilla="${casilla}"]`);
           fila.importes[campo] = valorEl ? valorEl.textContent : '0.00';
           fila.porcentajes[campo] = porcentajeEl ? porcentajeEl.textContent : '0.0000';
-          fila.cuentas[campo] = select && select.value ? Number(select.value) : null;
+          fila.cuentas[campo] = obtenerValorCuenta(select);
         });
         filas.push(fila);
       });

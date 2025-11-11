@@ -498,6 +498,13 @@ def _validar_filas_liquidacion(
             monto = _parse_decimal(importes.get(campo))
             monto_original = monto
             cuenta_id = cuentas.get(campo)
+            if isinstance(cuenta_id, str):
+                cuenta_id_normalizado = cuenta_id.strip().upper()
+                if (
+                    not cuenta_id_normalizado
+                    or cuenta_id_normalizado in {"NA", "N/A", "__NA__"}
+                ):
+                    cuenta_id = None
             porcentaje_input = (
                 _parse_decimal(porcentajes.get(campo))
                 if casilla in RETENCIONES
@@ -510,19 +517,7 @@ def _validar_filas_liquidacion(
             sin_opciones = not opciones
 
             if monto != Decimal("0"):
-                if not opciones:
-                    errores.append(
-                        {
-                            "fila": indice,
-                            "factura_id": fila.get("factura_id"),
-                            "campo": campo,
-                            "mensaje": CASILLA_RULES[casilla][
-                                "mensaje_sin_opciones"
-                            ],
-                        }
-                    )
-                    fila_valida = False
-                elif cuenta_id in (None, ""):
+                if cuenta_id in (None, "") and opciones:
                     errores.append(
                         {
                             "fila": indice,
@@ -581,11 +576,11 @@ def _validar_filas_liquidacion(
                                 "fila": indice,
                                 "factura_id": fila.get("factura_id"),
                                 "campo": campo,
-                            "mensaje": mensaje_prefijo,
-                        }
-                    )
-                    catalogo_valido = False
-                    fila_valida = False
+                                "mensaje": mensaje_prefijo,
+                            }
+                        )
+                        catalogo_valido = False
+                        fila_valida = False
                 if (
                     catalogo_valido
                     and catalogo is not None
