@@ -528,6 +528,7 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
             resultado["cuentas"]["subtotal"], self.parametros["SUBTOTAL"].id
         )
         self.assertEqual(resultado["porcentajes"]["retefuente"], "4.0000")
+        self.assertTrue(resultado["listo"])
 
     def test_error_por_cuenta_obligatoria(self):
         fila = self.build_fila_payload()
@@ -542,6 +543,7 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
         self.assertFalse(data.get("valido", False))
         mensajes = " ".join(error["mensaje"] for error in data["errores"])
         self.assertIn("El campo ‘Cuenta contable’ es obligatorio", mensajes)
+        self.assertFalse(data["filas"][0]["listo"])
 
     def test_error_por_cuenta_de_otro_proveedor(self):
         otro_proveedor = Proveedor.objects.create(

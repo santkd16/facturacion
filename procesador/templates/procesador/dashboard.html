@@ -27,8 +27,11 @@
     td.valor, td.valor-retencion { text-align:right; }
     td.porcentaje { text-align:right; min-width:90px; }
     td.estado-listo { text-align:center; white-space:nowrap; }
-    td.estado-listo label { display:flex; align-items:center; justify-content:center; gap:.35rem; font-size:.85rem; }
-    td.estado-listo input { accent-color:#1d70b8; }
+    td.estado-listo label { display:flex; align-items:center; justify-content:center; gap:.35rem; font-size:.85rem; cursor:default; }
+    td.estado-listo input { accent-color:#1d70b8; pointer-events:none; }
+    td.estado-listo .estado-texto { font-weight:600; }
+    td.estado-listo .estado-texto.estado-ok { color:#1e7e34; }
+    td.estado-listo .estado-texto.estado-pendiente { color:#c0392b; }
     .fila-lista { background:#f5fbf0; }
     .panel-filtros { border:1px solid #ccc; border-radius:6px; padding:0.75rem 1rem; margin:0.75rem 0; background:#f9fbfd; }
     .panel-filtros__contenedor { display:flex; flex-wrap:wrap; gap:1rem; align-items:flex-end; }
@@ -194,6 +197,16 @@
             {% endfor %}
           </select>
         </label>
+        <label>
+          Ordenar por
+          <select id="filtro-orden">
+            <option value="">Orden original</option>
+            <option value="fecha_asc">Fecha (ascendente)</option>
+            <option value="fecha_desc">Fecha (descendente)</option>
+            <option value="proveedor_asc">Proveedor (A-Z)</option>
+            <option value="proveedor_desc">Proveedor (Z-A)</option>
+          </select>
+        </label>
         <label class="panel-filtros__check">
           <input type="checkbox" id="filtro-listo">
           <span>Solo proveedores listos</span>
@@ -239,6 +252,8 @@
         <tbody id="tbody-liq">
           {% for fila in liquidacion_filas %}
           <tr
+            data-posicion="{{ forloop.counter0 }}"
+            data-indice="{{ forloop.counter0 }}"
             data-factura-id="{{ fila.factura_id }}"
             data-proveedor-id="{{ fila.proveedor_id|default:'' }}"
             data-tipo-documento="{{ fila.tipo_documento }}"
@@ -252,7 +267,7 @@
             data-iva="{{ fila.iva_raw }}"
             data-inc="{{ fila.inc_raw }}"
             data-total-neto-base="{{ fila.total_neto_raw }}"
-            data-listo="false"
+            data-listo="{{ 'true' if fila.listo else 'false' }}"
           >
             <td>{{ fila.tipo_documento }}</td>
             <td>{{ fila.cufe }}</td>
@@ -260,8 +275,8 @@
             <td>{{ fila.proveedor_nombre }}</td>
             <td class="estado-listo">
               <label>
-                <input type="checkbox" class="marca-listo" aria-label="Marcar como listo para descarga">
-                <span>OK</span>
+                <input type="checkbox" class="marca-listo" disabled aria-label="Estado de validación de la fila">
+                <span class="estado-texto estado-pendiente">Pendiente</span>
               </label>
             </td>
             <td>{{ fila.fecha }}</td>
@@ -597,8 +612,15 @@
       refrescarEstadoSelects(tr, totales);
     }
 
-    document.querySelectorAll('#tbody-liq tr').forEach((tr) => {
-      inicializarFila(tr);
+    const filasTabla = Array.from(document.querySelectorAll('#tbody-liq tr'));
+    const inicializaciones = filasTabla.map((tr) => {
+      actualizarEstadoListo(tr, tr.dataset.listo === 'true');
+      return inicializarFila(tr);
+    });
+    Promise.all(inicializaciones).then(() => {
+      if (filasTabla.length) {
+        validarFilas({ mostrarMensajes: false });
+      }
     });
 
     document.addEventListener('change', (evento) => {
@@ -607,13 +629,7 @@
         if (!tr) return;
         const totales = recalcularTotales(tr);
         refrescarEstadoSelects(tr, totales);
-      }
-      if (evento.target.matches('.marca-listo')) {
-        const tr = evento.target.closest('tr');
-        if (!tr) return;
-        const marcado = evento.target.checked;
-        tr.dataset.listo = marcado ? 'true' : 'false';
-        tr.classList.toggle('fila-lista', marcado);
+        actualizarEstadoListo(tr, false);
         aplicarFiltros();
       }
     });
@@ -669,8 +685,76 @@
     const filtroFechaHasta = document.getElementById('filtro-fecha-hasta');
     const filtroProveedor = document.getElementById('filtro-proveedor');
     const filtroListo = document.getElementById('filtro-listo');
+    const filtroOrden = document.getElementById('filtro-orden');
+
+    function actualizarEstadoListo(tr, listo) {
+      const estado = Boolean(listo);
+      tr.dataset.listo = estado ? 'true' : 'false';
+      tr.classList.toggle('fila-lista', estado);
+      const checkbox = tr.querySelector('.marca-listo');
+      if (checkbox) {
+        checkbox.checked = estado;
+      }
+      const texto = tr.querySelector('.estado-texto');
+      if (texto) {
+        texto.textContent = estado ? 'Listo' : 'Pendiente';
+        texto.classList.toggle('estado-ok', estado);
+        texto.classList.toggle('estado-pendiente', !estado);
+      }
+    }
+
+    function compararFechas(a, b, factor) {
+      const fechaA = a.dataset.fecha || '';
+      const fechaB = b.dataset.fecha || '';
+      if (!fechaA && !fechaB) return 0;
+      if (!fechaA) return 1 * factor;
+      if (!fechaB) return -1 * factor;
+      return fechaA.localeCompare(fechaB) * factor;
+    }
+
+    function compararTexto(valorA, valorB, factor) {
+      const textoA = (valorA || '').toLocaleLowerCase();
+      const textoB = (valorB || '').toLocaleLowerCase();
+      if (!textoA && !textoB) return 0;
+      if (!textoA) return 1 * factor;
+      if (!textoB) return -1 * factor;
+      return textoA.localeCompare(textoB) * factor;
+    }
+
+    function ordenarFilas() {
+      if (!filtroOrden) return;
+      const criterio = filtroOrden.value || '';
+      const filas = Array.from(document.querySelectorAll('#tbody-liq tr'));
+      if (!filas.length) return;
+      let comparador = (a, b) => Number(a.dataset.posicion || 0) - Number(b.dataset.posicion || 0);
+      if (criterio === 'fecha_asc') {
+        comparador = (a, b) => compararFechas(a, b, 1);
+      } else if (criterio === 'fecha_desc') {
+        comparador = (a, b) => compararFechas(a, b, -1);
+      } else if (criterio === 'proveedor_asc') {
+        comparador = (a, b) => compararTexto(a.dataset.proveedor, b.dataset.proveedor, 1);
+      } else if (criterio === 'proveedor_desc') {
+        comparador = (a, b) => compararTexto(a.dataset.proveedor, b.dataset.proveedor, -1);
+      }
+      const tbody = document.getElementById('tbody-liq');
+      filas.sort(comparador).forEach((tr, indice) => {
+        tbody.appendChild(tr);
+        tr.dataset.indice = String(indice);
+      });
+    }
+
+    function aplicarResultadoValidacion(resultados) {
+      const filasDom = Array.from(document.querySelectorAll('#tbody-liq tr'));
+      filasDom.forEach((tr, indice) => {
+        const info = Array.isArray(resultados) ? resultados[indice] : undefined;
+        const listo = info ? Boolean(info.listo) : false;
+        actualizarEstadoListo(tr, listo);
+      });
+      aplicarFiltros();
+    }
 
     function aplicarFiltros() {
+      ordenarFilas();
       const desde = filtroFechaDesde?.value || '';
       const hasta = filtroFechaHasta?.value || '';
       const proveedor = filtroProveedor?.value || '';
@@ -724,12 +808,15 @@
     document.getElementById('btn-aplicar-filtros')?.addEventListener('click', aplicarFiltros);
     document.getElementById('btn-limpiar-filtros')?.addEventListener('click', limpiarFiltros);
 
-    [filtroFechaDesde, filtroFechaHasta, filtroProveedor, filtroListo].forEach((elemento) => {
+    [filtroFechaDesde, filtroFechaHasta, filtroProveedor, filtroListo, filtroOrden].forEach((elemento) => {
       elemento?.addEventListener('change', aplicarFiltros);
     });
 
-    async function validarFilas() {
-      mostrarMensaje('Validando…', 'info');
+    async function validarFilas(opciones = {}) {
+      const { mostrarMensajes = true } = opciones;
+      if (mostrarMensajes) {
+        mostrarMensaje('Validando…', 'info');
+      }
       const filas = recolectarFilas();
       try {
         const respuesta = await fetch('{% url "liquidacion_validar" %}', {
@@ -741,31 +828,45 @@
           body: JSON.stringify({ filas }),
         });
         const datos = await respuesta.json();
-        if (respuesta.ok) {
-          mostrarMensaje('La validación se completó correctamente.', 'success');
+        if (Array.isArray(datos.filas)) {
+          aplicarResultadoValidacion(datos.filas);
+        } else {
+          aplicarResultadoValidacion([]);
+        }
+        if (respuesta.ok && datos.valido) {
+          if (mostrarMensajes) {
+            mostrarMensaje('La validación se completó correctamente.', 'success');
+          }
           return { filas: datos.filas || filas, valido: true };
         }
         const errores = datos.errores || [];
-        if (!errores.length) {
-          mostrarMensaje('La validación no se pudo completar.', 'error');
-          return { filas, valido: false };
+        if (mostrarMensajes) {
+          if (errores.length) {
+            const mensajes = errores
+              .map((err) => `Fila ${typeof err.fila === 'number' ? err.fila + 1 : ''}: ${err.mensaje}`)
+              .join('<br>');
+            mostrarMensaje(mensajes, 'error');
+          } else {
+            mostrarMensaje('La validación no se pudo completar.', 'error');
+          }
         }
-        const mensajes = errores.map((err) => `Fila ${err.fila + 1 || ''}: ${err.mensaje}`).join('<br>');
-        mostrarMensaje(mensajes, 'error');
-        return { filas, valido: false };
+        return { filas: datos.filas || filas, valido: false };
       } catch (error) {
         console.error('Error de validación', error);
-        mostrarMensaje('No fue posible validar la información.', 'error');
+        if (mostrarMensajes) {
+          mostrarMensaje('No fue posible validar la información.', 'error');
+        }
+        aplicarResultadoValidacion([]);
         return { filas, valido: false };
       }
     }
 
     document.getElementById('btn-validar')?.addEventListener('click', () => {
-      validarFilas();
+      validarFilas({ mostrarMensajes: true });
     });
 
     document.getElementById('btn-exportar')?.addEventListener('click', async () => {
-      const resultado = await validarFilas();
+      const resultado = await validarFilas({ mostrarMensajes: true });
       if (!resultado || !resultado.valido) {
         return;
       }

@@ -413,6 +413,7 @@ def dashboard(request):
             "total_neto": _decimal_to_str(total_neto_base),
             "total_neto_raw": str(total_neto_base),
             "coincide_xml": factura_xml is not None,
+            "listo": False,
         }
 
         if proveedor is not None:
@@ -480,6 +481,8 @@ def _validar_filas_liquidacion(
         porcentajes = fila.get("porcentajes") or {}
         proveedor_id = fila.get("proveedor_id")
 
+        fila_valida = True
+
         subtotal = _parse_decimal(importes.get("subtotal"))
         iva = _parse_decimal(importes.get("iva"))
         inc = _parse_decimal(importes.get("inc"))
@@ -518,6 +521,7 @@ def _validar_filas_liquidacion(
                             ],
                         }
                     )
+                    fila_valida = False
                 elif cuenta_id in (None, ""):
                     errores.append(
                         {
@@ -527,6 +531,7 @@ def _validar_filas_liquidacion(
                             "mensaje": CAMPO_OBLIGATORIO_MSG,
                         }
                     )
+                    fila_valida = False
 
             if cuenta_id not in (None, ""):
                 try:
@@ -543,6 +548,7 @@ def _validar_filas_liquidacion(
                         }
                     )
                     catalogo_valido = False
+                    fila_valida = False
                 elif proveedor_id is None or catalogo.proveedor_id != proveedor_id:
                     errores.append(
                         {
@@ -553,6 +559,7 @@ def _validar_filas_liquidacion(
                         }
                     )
                     catalogo_valido = False
+                    fila_valida = False
                 elif catalogo.casilla != casilla:
                     errores.append(
                         {
@@ -563,6 +570,7 @@ def _validar_filas_liquidacion(
                         }
                     )
                     catalogo_valido = False
+                    fila_valida = False
                 else:
                     mensaje_prefijo = validar_prefijo_para_casilla(
                         casilla, catalogo.cuenta.codigo
@@ -573,10 +581,11 @@ def _validar_filas_liquidacion(
                                 "fila": indice,
                                 "factura_id": fila.get("factura_id"),
                                 "campo": campo,
-                                "mensaje": mensaje_prefijo,
-                            }
-                        )
-                        catalogo_valido = False
+                            "mensaje": mensaje_prefijo,
+                        }
+                    )
+                    catalogo_valido = False
+                    fila_valida = False
                 if (
                     catalogo_valido
                     and catalogo is not None
@@ -592,6 +601,7 @@ def _validar_filas_liquidacion(
                         }
                     )
                     catalogo_valido = False
+                    fila_valida = False
 
             casilla_info = {
                 "monto": monto,
@@ -622,6 +632,7 @@ def _validar_filas_liquidacion(
                             ],
                         }
                     )
+                    fila_valida = False
                 else:
                     porcentaje_calc, valor_calc = calcular_retencion(
                         subtotal, catalogo
@@ -662,6 +673,7 @@ def _validar_filas_liquidacion(
                             "mensaje": CAMPO_OBLIGATORIO_MSG,
                         }
                     )
+                    fila_valida = False
 
             casillas_resultado[casilla] = casilla_info
 
@@ -679,6 +691,7 @@ def _validar_filas_liquidacion(
                 "reteica": reteica_val,
                 "reteiva": reteiva_val,
                 "total_neto": subtotal + iva + inc - retefuente_val - reteica_val - reteiva_val,
+                "valida": fila_valida,
             }
         )
 
@@ -693,6 +706,7 @@ def _serializar_fila_validada(fila: dict) -> dict:
         "importes": {},
         "cuentas": {},
         "porcentajes": {},
+        "listo": fila.get("valida", False),
     }
 
     for casilla, info in fila["casillas"].items():
