@@ -267,7 +267,7 @@
             data-iva="{{ fila.iva_raw }}"
             data-inc="{{ fila.inc_raw }}"
             data-total-neto-base="{{ fila.total_neto_raw }}"
-            data-listo="{{ 'true' if fila.listo else 'false' }}"
+            data-listo="{% if fila.listo %}true{% else %}false{% endif %}"
           >
             <td>{{ fila.tipo_documento }}</td>
             <td>{{ fila.cufe }}</td>
