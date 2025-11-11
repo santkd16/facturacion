@@ -16,7 +16,27 @@
   </style>
 </head>
 <body>
-  <h1>Gestión Facturación</h1>
+  <header style="display:flex; justify-content:space-between; align-items:center; background:#1d70b8; color:#fff; padding:1rem 1.5rem; border-radius:6px;">
+    <div>
+      <h1 style="margin:0;">Gestión Facturación</h1>
+      <p style="margin:0.25rem 0 0; font-size:0.95rem;">Empresa actual: <strong>{{ empresa.nombre }}</strong></p>
+    </div>
+    <div style="text-align:right; font-size:0.9rem;">
+      <p style="margin:0;">{{ request.user.get_full_name|default:request.user.username }}</p>
+      <a href="{% url 'seleccionar_empresa' %}" style="color:#fff; text-decoration:underline; margin-right:1rem;">Cambiar empresa</a>
+      <a href="{% url 'logout' %}" style="color:#fff; text-decoration:underline;">Cerrar sesión</a>
+    </div>
+  </header>
+
+  {% if messages %}
+  <div style="margin:1rem 0;">
+    {% for message in messages %}
+      <div style="padding:0.75rem 1rem; border-radius:4px; margin-bottom:0.5rem; background:{% if message.tags == 'error' %}#fdecea{% elif message.tags == 'success' %}#e6f4ea{% else %}#eef5fb{% endif %}; color:{% if message.tags == 'error' %}#c0392b{% elif message.tags == 'success' %}#1e7e34{% else %}#31708f{% endif %};">
+        {{ message }}
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <h3>Subir Excel</h3>
   <form method="post" enctype="multipart/form-data">

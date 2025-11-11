@@ -2,17 +2,50 @@ import csv
 import os
 import tempfile
 import zipfile
-from io import BytesIO
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
 
 import pandas as pd
+from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import FacturaXML, FacturaXLS, Proveedor
+from .models import (
+    Empresa,
+    FacturaXML,
+    FacturaXLS,
+    PermisoEmpresa,
+    Proveedor,
+)
 from .views import _extract_fecha_xls, procesar_xml, sincronizar_estado_facturas_xls
+
+
+class EmpresaTestMixin:
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.empresa = Empresa.objects.create(nombre="GOL", nit="GOL-TEST")
+        User = get_user_model()
+        cls.usuario = User.objects.create_user(
+            username="usuario@example.com",
+            email="usuario@example.com",
+            password="segura123",
+            first_name="Usuario",
+            last_name="Demo",
+        )
+        PermisoEmpresa.objects.create(
+            usuario=cls.usuario,
+            empresa=cls.empresa,
+            es_administrador=True,
+        )
+
+    def autenticar(self):
+        self.client.force_login(self.usuario)
+        session = self.client.session
+        session["empresa_actual_id"] = self.empresa.id
+        session.save()
 
 
 def _write_xml(content: str) -> str:
@@ -41,7 +74,7 @@ class ExtraerFechaXLSTests(TestCase):
         self.assertIsNone(_extract_fecha_xls(fila))
 
 
-class ProcesarXMLTests(TestCase):
+class ProcesarXMLTests(EmpresaTestMixin, TestCase):
     def test_procesar_xml_crea_factura_y_proveedor(self):
         xml_content = """<?xml version='1.0' encoding='UTF-8'?>
         <Invoice xmlns='urn:oasis:names:specification:ubl:schema:xsd:Invoice-2'
@@ -77,10 +110,10 @@ class ProcesarXMLTests(TestCase):
         xml_path = _write_xml(xml_content)
         self.addCleanup(lambda: os.remove(xml_path))
 
-        procesar_xml(xml_path)
+        procesar_xml(xml_path, self.empresa)
 
-        factura = FacturaXML.objects.get(cufe="123ABC")
-        proveedor = Proveedor.objects.get(nit="900123456")
+        factura = FacturaXML.objects.get(cufe="123ABC", empresa=self.empresa)
+        proveedor = Proveedor.objects.get(nit="900123456", empresa=self.empresa)
 
         self.assertEqual(factura.proveedor, proveedor)
         self.assertEqual(factura.descripcion, "Servicio de pruebas")
@@ -114,9 +147,9 @@ class ProcesarXMLTests(TestCase):
         xml_path = _write_xml(xml_content)
         self.addCleanup(lambda: os.remove(xml_path))
 
-        procesar_xml(xml_path)
+        procesar_xml(xml_path, self.empresa)
 
-        factura = FacturaXML.objects.get(cufe="456DEF")
+        factura = FacturaXML.objects.get(cufe="456DEF", empresa=self.empresa)
 
         self.assertEqual(factura.descripcion, "")
         self.assertEqual(factura.subtotal, Decimal("0"))
@@ -124,14 +157,18 @@ class ProcesarXMLTests(TestCase):
         self.assertEqual(factura.total, Decimal("0"))
 
 
-class SincronizarEstadoFacturasXLSTests(TestCase):
+class SincronizarEstadoFacturasXLSTests(EmpresaTestMixin, TestCase):
     def setUp(self):
+        super().setUp()
         self.proveedor = Proveedor.objects.create(
-            nit="900555111", nombre="Proveedor Sincronización"
+            empresa=self.empresa,
+            nit="900555111",
+            nombre="Proveedor Sincronización",
         )
 
     def test_activa_factura_cuando_xml_existe(self):
         FacturaXML.objects.create(
+            empresa=self.empresa,
             cufe="SYNC-1",
             fecha=date(2024, 3, 10),
             descripcion="Factura sincronizada",
@@ -142,6 +179,7 @@ class SincronizarEstadoFacturasXLSTests(TestCase):
         )
 
         FacturaXLS.objects.create(
+            empresa=self.empresa,
             tipo_documento="Factura electrónica",
             cufe="SYNC-1",
             iva=Decimal("19.00"),
@@ -149,13 +187,14 @@ class SincronizarEstadoFacturasXLSTests(TestCase):
             activo=False,
         )
 
-        sincronizar_estado_facturas_xls()
+        sincronizar_estado_facturas_xls(self.empresa)
 
-        factura_xls = FacturaXLS.objects.get(cufe="SYNC-1")
+        factura_xls = FacturaXLS.objects.get(cufe="SYNC-1", empresa=self.empresa)
         self.assertTrue(factura_xls.activo)
 
     def test_desactiva_factura_cuando_xml_no_existe(self):
         FacturaXLS.objects.create(
+            empresa=self.empresa,
             tipo_documento="Factura electrónica",
             cufe="SYNC-2",
             iva=Decimal("0"),
@@ -163,15 +202,20 @@ class SincronizarEstadoFacturasXLSTests(TestCase):
             activo=True,
         )
 
-        sincronizar_estado_facturas_xls()
+        sincronizar_estado_facturas_xls(self.empresa)
 
-        factura_xls = FacturaXLS.objects.get(cufe="SYNC-2")
+        factura_xls = FacturaXLS.objects.get(cufe="SYNC-2", empresa=self.empresa)
         self.assertFalse(factura_xls.activo)
 
 
-class DashboardUploadZipTests(TestCase):
+class DashboardUploadZipTests(EmpresaTestMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.autenticar()
+
     def test_zip_upload_syncs_existing_factura_xls(self):
         FacturaXLS.objects.create(
+            empresa=self.empresa,
             tipo_documento="Factura electrónica",
             cufe="ZIP-1",
             iva=Decimal("0"),
@@ -220,18 +264,25 @@ class DashboardUploadZipTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
 
-        self.assertTrue(FacturaXML.objects.filter(cufe="ZIP-1").exists())
-        factura_xls = FacturaXLS.objects.get(cufe="ZIP-1")
+        self.assertTrue(
+            FacturaXML.objects.filter(cufe="ZIP-1", empresa=self.empresa).exists()
+        )
+        factura_xls = FacturaXLS.objects.get(cufe="ZIP-1", empresa=self.empresa)
         self.assertTrue(factura_xls.activo)
 
 
-class DashboardFechaExcelTests(TestCase):
+class DashboardFechaExcelTests(EmpresaTestMixin, TestCase):
     def setUp(self):
+        super().setUp()
+        self.autenticar()
         self.proveedor = Proveedor.objects.create(
-            nit="901112223", nombre="Proveedor Fecha"
+            empresa=self.empresa,
+            nit="901112223",
+            nombre="Proveedor Fecha",
         )
 
         self.factura_xml = FacturaXML.objects.create(
+            empresa=self.empresa,
             cufe="FECHA-1",
             fecha=date(2024, 4, 30),
             descripcion="Factura con fecha",
@@ -242,6 +293,7 @@ class DashboardFechaExcelTests(TestCase):
         )
 
         FacturaXLS.objects.create(
+            empresa=self.empresa,
             tipo_documento="Factura electrónica",
             cufe="FECHA-1",
             folio="123",
@@ -267,14 +319,19 @@ class DashboardFechaExcelTests(TestCase):
         # Y también debe serializarse para la liquidación cuando coincide el CUFE.
         self.assertIn('data-fecha="2024-05-02"', contenido)
 
-class DescargarLiquidacionCSVTests(TestCase):
+class DescargarLiquidacionCSVTests(EmpresaTestMixin, TestCase):
     def setUp(self):
+        super().setUp()
+        self.autenticar()
         self.proveedor = Proveedor.objects.create(
-            nit="900888777", nombre="Proveedor CSV"
+            empresa=self.empresa,
+            nit="900888777",
+            nombre="Proveedor CSV",
         )
 
     def _crear_factura_xml(self, cufe: str) -> FacturaXML:
         return FacturaXML.objects.create(
+            empresa=self.empresa,
             cufe=cufe,
             fecha=date(2024, 1, 15),
             descripcion="Servicio demo",
@@ -291,6 +348,7 @@ class DescargarLiquidacionCSVTests(TestCase):
         fecha_documento: date | None,
     ) -> FacturaXLS:
         return FacturaXLS.objects.create(
+            empresa=self.empresa,
             tipo_documento="Factura electrónica",
             cufe=cufe,
             folio="001",
