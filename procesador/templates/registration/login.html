@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Iniciar sesión</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f7f7f7; margin: 0; padding: 0; }
+        .container { max-width: 420px; margin: 6rem auto; padding: 2rem; background: #fff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        h1 { margin-top: 0; text-align: center; color: #1d70b8; }
+        form { display: flex; flex-direction: column; gap: 1rem; }
+        label { font-weight: 600; }
+        input { padding: 0.6rem 0.8rem; border: 1px solid #ccc; border-radius: 4px; font-size: 1rem; }
+        button { padding: 0.75rem; background: #1d70b8; color: #fff; font-size: 1rem; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #155d94; }
+        .errorlist { color: #c0392b; margin: 0; padding: 0; list-style: none; }
+        .messages { margin-bottom: 1rem; }
+        .messages li { list-style: none; padding: 0.5rem 0.75rem; border-radius: 4px; margin-bottom: 0.5rem; }
+        .messages li.error { background: #fdecea; color: #c0392b; }
+        .messages li.info { background: #eef5fb; color: #31708f; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Gestión de Facturas</h1>
+    {% if messages %}
+    <ul class="messages">
+        {% for message in messages %}
+        <li class="{{ message.tags }}">{{ message }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    <form method="post" novalidate>
+        {% csrf_token %}
+        <div>
+            <label for="id_username">Correo electrónico</label>
+            <input type="email" name="username" id="id_username" value="{{ form.username.value|default:'' }}" required autofocus>
+            {% if form.username.errors %}
+            <ul class="errorlist">
+                {% for error in form.username.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+        <div>
+            <label for="id_password">Contraseña</label>
+            <input type="password" name="password" id="id_password" required>
+            {% if form.password.errors %}
+            <ul class="errorlist">
+                {% for error in form.password.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+        <button type="submit">Entrar</button>
+    </form>
+</div>
+</body>
+</html>

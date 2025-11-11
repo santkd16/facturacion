@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Seleccionar empresa</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f6f8; margin: 0; }
+    header { background: #1d70b8; color: white; padding: 1.5rem; text-align: center; }
+    main { max-width: 720px; margin: 2rem auto; background: white; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); padding: 2rem; }
+    h1 { margin-top: 0; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { border: 1px solid #e0e6ed; border-radius: 6px; padding: 1rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; }
+    button { background: #1d70b8; color: #fff; border: none; border-radius: 4px; padding: 0.5rem 1rem; cursor: pointer; }
+    button:hover { background: #155d94; }
+    .acciones { display: flex; gap: 1rem; justify-content: flex-end; margin-top: 1.5rem; }
+    .mensaje { padding: 1rem; border-radius: 6px; margin-bottom: 1rem; }
+    .mensaje.success { background: #e6f4ea; color: #1e7e34; }
+    .mensaje.error { background: #fdecea; color: #c0392b; }
+    .mensaje.info { background: #eef5fb; color: #31708f; }
+    .empresa-actual { font-size: 0.95rem; color: #555; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Selecciona la empresa</h1>
+  </header>
+  <main>
+    {% if messages %}
+      {% for message in messages %}
+        <div class="mensaje {{ message.tags }}">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+
+    {% if empresa_actual %}
+      <p class="empresa-actual">Empresa actual: <strong>{{ empresa_actual.nombre }}</strong></p>
+    {% endif %}
+
+    <form method="post">
+      {% csrf_token %}
+      <ul>
+        {% for permiso in permisos %}
+        <li>
+          <span>{{ permiso.empresa.nombre }} (NIT: {{ permiso.empresa.nit }})</span>
+          <button type="submit" name="empresa_id" value="{{ permiso.empresa.id }}">Ingresar</button>
+        </li>
+        {% endfor %}
+      </ul>
+    </form>
+
+    <div class="acciones">
+      <a href="{% url 'logout' %}" style="color:#c0392b; text-decoration:none;">Cerrar sesión</a>
+    </div>
+  </main>
+</body>
+</html>

@@ -7,6 +7,8 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import xml.etree.ElementTree as ET
 import pandas as pd
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from django.db import connection
 from django.db.utils import DatabaseError, ProgrammingError
 from django.http import HttpResponse
@@ -14,7 +16,15 @@ from django.shortcuts import redirect, render
 from django.utils.dateparse import parse_date
 
 from .forms import UploadExcelForm, UploadZipForm
-from .models import FacturaXML, FacturaXLS, Proveedor, Retencion, TarifaICA
+from .models import (
+    Empresa,
+    FacturaXML,
+    FacturaXLS,
+    PermisoEmpresa,
+    Proveedor,
+    Retencion,
+    TarifaICA,
+)
 
 # Namespaces for XML UBL
 ns = {
@@ -130,10 +140,12 @@ def ensure_fecha_documento_column() -> None:
         return
 
 
-def sincronizar_estado_facturas_xls():
-    xml_cufes = set(FacturaXML.objects.values_list("cufe", flat=True))
+def sincronizar_estado_facturas_xls(empresa: Empresa):
+    xml_cufes = set(
+        FacturaXML.objects.filter(empresa=empresa).values_list("cufe", flat=True)
+    )
     actualizar = []
-    for f in FacturaXLS.objects.all().only("id", "cufe", "activo"):
+    for f in FacturaXLS.objects.filter(empresa=empresa).only("id", "cufe", "activo"):
         activo = f.cufe in xml_cufes
         if f.activo != activo:
             f.activo = activo
@@ -142,7 +154,7 @@ def sincronizar_estado_facturas_xls():
         FacturaXLS.objects.bulk_update(actualizar, ["activo"])
 
 
-def procesar_xml(ruta_xml: str) -> None:
+def procesar_xml(ruta_xml: str, empresa: Empresa) -> None:
     """Procesa un XML UBL y crea/actualiza el FacturaXML correspondiente."""
     tree = ET.parse(ruta_xml)
     root = tree.getroot()
@@ -174,10 +186,12 @@ def procesar_xml(ruta_xml: str) -> None:
         _find_text(root, "cac:LegalMonetaryTotal/cbc:PayableAmount")
     )
     proveedor, _ = Proveedor.objects.get_or_create(
+        empresa=empresa,
         nit=nit_proveedor,
         defaults={"nombre": proveedor_nombre},
     )
     FacturaXML.objects.get_or_create(
+        empresa=empresa,
         cufe=cufe,
         defaults={
             "fecha": fecha,
@@ -190,9 +204,61 @@ def procesar_xml(ruta_xml: str) -> None:
     )
 
 
+def _obtener_empresa_actual(request) -> Empresa | None:
+    empresa_id = request.session.get("empresa_actual_id")
+    if not empresa_id:
+        return None
+    try:
+        return Empresa.objects.get(id=empresa_id, activo=True)
+    except Empresa.DoesNotExist:
+        return None
+
+
+@login_required
+def seleccionar_empresa(request):
+    permisos = (
+        PermisoEmpresa.objects.filter(usuario=request.user, empresa__activo=True)
+        .select_related("empresa")
+        .order_by("empresa__nombre")
+    )
+    if not permisos.exists():
+        messages.error(
+            request,
+            "No tienes empresas asignadas. Contacta con un administrador para obtener acceso.",
+        )
+        return redirect("logout")
+
+    if request.method == "POST":
+        empresa_id = request.POST.get("empresa_id")
+        permiso = permisos.filter(empresa_id=empresa_id).first()
+        if permiso is None:
+            messages.error(request, "No tienes acceso a la empresa seleccionada.")
+        else:
+            request.session["empresa_actual_id"] = permiso.empresa_id
+            messages.success(
+                request, f"Empresa {permiso.empresa.nombre} seleccionada correctamente."
+            )
+            return redirect("dashboard")
+
+    empresa_actual = _obtener_empresa_actual(request)
+    return render(
+        request,
+        "procesador/seleccionar_empresa.html",
+        {
+            "permisos": permisos,
+            "empresa_actual": empresa_actual,
+        },
+    )
+
+
+@login_required
 def dashboard(request):
     """Vista principal del tablero de facturación."""
     ensure_fecha_documento_column()
+    empresa = _obtener_empresa_actual(request)
+    if empresa is None:
+        messages.info(request, "Selecciona una empresa para continuar.")
+        return redirect("seleccionar_empresa")
     if request.method == "POST":
         # Subir Excel
         if "upload_excel" in request.POST:
@@ -208,6 +274,7 @@ def dashboard(request):
                     ]:
                         fecha_excel = _extract_fecha_xls(row)
                         factura, _ = FacturaXLS.objects.get_or_create(
+                            empresa=empresa,
                             cufe=row["CUFE/CUDE"],
                             defaults={
                                 "tipo_documento": row["Tipo de documento"],
@@ -224,10 +291,10 @@ def dashboard(request):
                         if fecha_excel is not None:
                             factura.fecha_documento = fecha_excel
                         factura.activo = FacturaXML.objects.filter(
-                            cufe=factura.cufe
+                            empresa=empresa, cufe=factura.cufe
                         ).exists()
                         factura.save()
-                sincronizar_estado_facturas_xls()
+                sincronizar_estado_facturas_xls(empresa)
                 return redirect("dashboard")
 
         # Subir ZIP con XML
@@ -247,18 +314,20 @@ def dashboard(request):
                         for file in files:
                             if file.endswith(".xml"):
                                 try:
-                                    procesar_xml(os.path.join(root_dir, file))
+                                    procesar_xml(os.path.join(root_dir, file), empresa)
                                 except ValueError:
                                     continue
-                sincronizar_estado_facturas_xls()
+                sincronizar_estado_facturas_xls(empresa)
                 return redirect("dashboard")
     else:
         form_excel = UploadExcelForm()
         form_zip = UploadZipForm()
 
-    facturas_xml = FacturaXML.objects.select_related("proveedor")
+    facturas_xml = (
+        FacturaXML.objects.filter(empresa=empresa).select_related("proveedor")
+    )
     facturas_xml_map = {fx.cufe: fx for fx in facturas_xml}
-    facturas_xls = FacturaXLS.objects.all()
+    facturas_xls = FacturaXLS.objects.filter(empresa=empresa)
 
     # --- NUEVO: datos para la pestaña Liquidación ---
     # Obtener tarifas ICA; si no existen, usar valores por defecto.
@@ -342,6 +411,7 @@ def dashboard(request):
         request,
         "procesador/dashboard.html",
         {
+            "empresa": empresa,
             "form_excel": form_excel,
             "form_zip": form_zip,
             "facturas_xml": facturas_xml,
@@ -351,6 +421,7 @@ def dashboard(request):
     )
 
 
+@login_required
 def descargar_liquidacion_csv(request):
     """Exporta un CSV con la liquidación global.
 
@@ -361,6 +432,10 @@ def descargar_liquidacion_csv(request):
     """
 
     ensure_fecha_documento_column()
+    empresa = _obtener_empresa_actual(request)
+    if empresa is None:
+        messages.info(request, "Selecciona una empresa para continuar.")
+        return redirect("seleccionar_empresa")
 
     import csv
     import io
@@ -403,10 +478,10 @@ def descargar_liquidacion_csv(request):
     else:
         facturas_xml = {
             fx.cufe: fx
-            for fx in FacturaXML.objects.select_related("proveedor")
+            for fx in FacturaXML.objects.filter(empresa=empresa).select_related("proveedor")
         }
 
-        for factura in FacturaXLS.objects.all():
+        for factura in FacturaXLS.objects.filter(empresa=empresa):
             subtotal = (
                 _parse_decimal(factura.total)
                 - _parse_decimal(factura.iva)
