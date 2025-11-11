@@ -26,6 +26,17 @@
     td.cuenta .alerta { display:block; font-size:0.75rem; color:#c0392b; margin-top:0.25rem; }
     td.valor, td.valor-retencion { text-align:right; }
     td.porcentaje { text-align:right; min-width:90px; }
+    td.estado-listo { text-align:center; white-space:nowrap; }
+    td.estado-listo label { display:flex; align-items:center; justify-content:center; gap:.35rem; font-size:.85rem; }
+    td.estado-listo input { accent-color:#1d70b8; }
+    .fila-lista { background:#f5fbf0; }
+    .panel-filtros { border:1px solid #ccc; border-radius:6px; padding:0.75rem 1rem; margin:0.75rem 0; background:#f9fbfd; }
+    .panel-filtros__contenedor { display:flex; flex-wrap:wrap; gap:1rem; align-items:flex-end; }
+    .panel-filtros label { display:flex; flex-direction:column; font-size:0.85rem; color:#333; }
+    .panel-filtros input[type="date"], .panel-filtros select { padding:0.35rem 0.5rem; border:1px solid #bbb; border-radius:4px; min-width:180px; }
+    .panel-filtros__acciones { display:flex; gap:.5rem; }
+    .panel-filtros__check { display:flex; align-items:center; gap:0.35rem; font-size:0.9rem; cursor:pointer; }
+    .panel-filtros__check input { margin:0; accent-color:#1d70b8; }
   </style>
 </head>
 <body>
@@ -155,13 +166,44 @@
        aria-labelledby="tab-liq" hidden>
     <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem;">
       <h2 style="margin:0;">Liquidación de facturas</h2>
-      <div style="display:flex; gap:.5rem;">
+      <div style="display:flex; gap:.5rem; align-items:center;">
+        <button type="button" id="btn-filtros" class="btn-secundario" aria-controls="panel-filtros" aria-expanded="false">Filtros</button>
         <button type="button" id="btn-validar" class="btn-primario">Validar selección</button>
         <button type="button" id="btn-exportar" class="btn-secundario">Descargar CSV</button>
       </div>
     </div>
 
     <div id="liquidacion-mensajes" role="status" aria-live="polite" style="margin:.75rem 0;"></div>
+
+    <div id="panel-filtros" class="panel-filtros" hidden>
+      <div class="panel-filtros__contenedor">
+        <label>
+          Fecha desde
+          <input type="date" id="filtro-fecha-desde">
+        </label>
+        <label>
+          Fecha hasta
+          <input type="date" id="filtro-fecha-hasta">
+        </label>
+        <label>
+          Proveedor
+          <select id="filtro-proveedor">
+            <option value="">Todos</option>
+            {% for proveedor in liquidacion_proveedores %}
+            <option value="{{ proveedor.id }}">{{ proveedor.nombre }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="panel-filtros__check">
+          <input type="checkbox" id="filtro-listo">
+          <span>Solo proveedores listos</span>
+        </label>
+        <div class="panel-filtros__acciones">
+          <button type="button" id="btn-aplicar-filtros" class="btn-primario">Aplicar</button>
+          <button type="button" id="btn-limpiar-filtros" class="btn-secundario">Limpiar</button>
+        </div>
+      </div>
+    </div>
 
     <div style="overflow-x:auto;">
       <table id="tabla-liquidacion">
@@ -171,6 +213,7 @@
             <th>CUFE/CUDE</th>
             <th>NIT</th>
             <th>Proveedor</th>
+            <th>Listo</th>
             <th>Fecha</th>
             <th>Descripción</th>
             <th>Prefijo + Folio</th>
@@ -209,11 +252,18 @@
             data-iva="{{ fila.iva_raw }}"
             data-inc="{{ fila.inc_raw }}"
             data-total-neto-base="{{ fila.total_neto_raw }}"
+            data-listo="false"
           >
             <td>{{ fila.tipo_documento }}</td>
             <td>{{ fila.cufe }}</td>
             <td>{{ fila.nit }}</td>
             <td>{{ fila.proveedor_nombre }}</td>
+            <td class="estado-listo">
+              <label>
+                <input type="checkbox" class="marca-listo" aria-label="Marcar como listo para descarga">
+                <span>OK</span>
+              </label>
+            </td>
             <td>{{ fila.fecha }}</td>
             <td>{{ fila.descripcion_display }}</td>
             <td>{{ fila.prefijo_folio }}</td>
@@ -312,6 +362,16 @@
       RETEIVA: 'reteiva',
       TOTAL_NETO: 'totalneto',
     };
+    const CASILLA_FIELD_MAP = {
+      SUBTOTAL: 'subtotal',
+      IVA: 'iva',
+      INC: 'inc',
+      RETEFUENTE: 'retefuente',
+      RETEICA: 'reteica',
+      RETEIVA: 'reteiva',
+      TOTAL_NETO: 'total_neto',
+    };
+    const CASILLAS_VALOR_FIJO = ['SUBTOTAL', 'IVA', 'INC', 'TOTAL_NETO'];
     const RETENCIONES = new Set(['RETEFUENTE', 'RETEICA', 'RETEIVA']);
     const catalogCache = new Map();
 
@@ -319,6 +379,56 @@
       return Number(valor || 0).toLocaleString('es-CO', {
         minimumFractionDigits: decimales,
         maximumFractionDigits: decimales,
+      });
+    }
+
+    function esCero(valor) {
+      return Math.abs(Number(valor || 0)) < 0.00005;
+    }
+
+    function refrescarEstadoSelects(tr, totales) {
+      const mapaValores = {
+        SUBTOTAL: totales.subtotal,
+        IVA: totales.iva,
+        INC: totales.inc,
+        TOTAL_NETO: totales.totalNeto,
+      };
+
+      tr.querySelectorAll('select.cuenta-select').forEach((select) => {
+        const td = select.closest('td');
+        if (!td) return;
+        const casilla = select.dataset.casilla;
+        if (td.dataset.sinOpciones === 'true') {
+          select.disabled = true;
+          select.value = '';
+          td.dataset.mensajeAuto = 'sin_opciones';
+          establecerMensajeCampo(td, 'Proveedor sin parametrización. Cuenta contable = N/A.');
+          return;
+        }
+
+        if (CASILLAS_VALOR_FIJO.includes(casilla)) {
+          const valor = mapaValores[casilla];
+          if (esCero(valor)) {
+            if (select.value) {
+              select.value = '';
+            }
+            select.disabled = true;
+            td.dataset.mensajeAuto = 'valor_cero';
+            establecerMensajeCampo(td, 'Valor en 0 → Cuenta contable = N/A.');
+            return;
+          }
+          select.disabled = false;
+          if (td.dataset.mensajeAuto === 'valor_cero') {
+            establecerMensajeCampo(td, '');
+            td.dataset.mensajeAuto = '';
+          }
+          return;
+        }
+
+        if (td.dataset.mensajeAuto === 'valor_cero') {
+          establecerMensajeCampo(td, '');
+          td.dataset.mensajeAuto = '';
+        }
       });
     }
 
@@ -362,7 +472,7 @@
       return base * (tasa / 100);
     }
 
-    function actualizarTotales(tr) {
+    function recalcularTotales(tr) {
       const subtotal = Number(tr.dataset.subtotal || '0');
       const iva = Number(tr.dataset.iva || '0');
       const inc = Number(tr.dataset.inc || '0');
@@ -427,10 +537,14 @@
       const valorAnterior = select.value;
       select.innerHTML = '<option value="">Seleccione cuenta</option>';
       if (!opciones || !opciones.length) {
+        td.dataset.sinOpciones = 'true';
+        td.dataset.mensajeAuto = 'sin_opciones';
         select.disabled = true;
-        establecerMensajeCampo(td, 'No hay opciones disponibles para esta casilla; parametrice el proveedor.');
+        establecerMensajeCampo(td, 'Proveedor sin parametrización. Cuenta contable = N/A.');
         return;
       }
+      td.dataset.sinOpciones = 'false';
+      td.dataset.mensajeAuto = '';
       select.disabled = false;
       opciones.forEach((item) => {
         const opcion = document.createElement('option');
@@ -448,6 +562,7 @@
       });
       if (opciones.length === 1) {
         select.value = opciones[0].id;
+        td.dataset.mensajeAuto = 'auto';
         establecerMensajeCampo(td, 'Seleccionado automáticamente por única opción.');
       } else if (valorAnterior) {
         select.value = valorAnterior;
@@ -460,9 +575,15 @@
       if (!proveedorId) {
         selects.forEach((select) => {
           select.disabled = true;
-          establecerMensajeCampo(select.closest('td'), 'No hay proveedor asociado.');
+          const td = select.closest('td');
+          if (td) {
+            td.dataset.sinOpciones = 'true';
+            td.dataset.mensajeAuto = 'sin_opciones';
+            establecerMensajeCampo(td, 'No hay proveedor asociado. Cuenta contable = N/A.');
+          }
         });
-        actualizarTotales(tr);
+        const totales = recalcularTotales(tr);
+        refrescarEstadoSelects(tr, totales);
         return;
       }
       const catalogos = await cargarCatalogos(proveedorId);
@@ -472,7 +593,8 @@
         const opciones = catalogos && catalogos[clave] ? catalogos[clave] : [];
         poblarSelect(select, opciones, casilla);
       });
-      actualizarTotales(tr);
+      const totales = recalcularTotales(tr);
+      refrescarEstadoSelects(tr, totales);
     }
 
     document.querySelectorAll('#tbody-liq tr').forEach((tr) => {
@@ -482,14 +604,25 @@
     document.addEventListener('change', (evento) => {
       if (evento.target.matches('#tbody-liq select.cuenta-select')) {
         const tr = evento.target.closest('tr');
-        actualizarTotales(tr);
+        if (!tr) return;
+        const totales = recalcularTotales(tr);
+        refrescarEstadoSelects(tr, totales);
+      }
+      if (evento.target.matches('.marca-listo')) {
+        const tr = evento.target.closest('tr');
+        if (!tr) return;
+        const marcado = evento.target.checked;
+        tr.dataset.listo = marcado ? 'true' : 'false';
+        tr.classList.toggle('fila-lista', marcado);
+        aplicarFiltros();
       }
     });
 
     function recolectarFilas() {
       const filas = [];
       document.querySelectorAll('#tbody-liq tr').forEach((tr) => {
-        const totales = actualizarTotales(tr);
+        const totales = recalcularTotales(tr);
+        refrescarEstadoSelects(tr, totales);
         const fila = {
           factura_id: tr.dataset.facturaId || null,
           proveedor_id: tr.dataset.proveedorId ? Number(tr.dataset.proveedorId) : null,
@@ -529,6 +662,71 @@
       });
       return filas;
     }
+
+    const panelFiltros = document.getElementById('panel-filtros');
+    const btnFiltros = document.getElementById('btn-filtros');
+    const filtroFechaDesde = document.getElementById('filtro-fecha-desde');
+    const filtroFechaHasta = document.getElementById('filtro-fecha-hasta');
+    const filtroProveedor = document.getElementById('filtro-proveedor');
+    const filtroListo = document.getElementById('filtro-listo');
+
+    function aplicarFiltros() {
+      const desde = filtroFechaDesde?.value || '';
+      const hasta = filtroFechaHasta?.value || '';
+      const proveedor = filtroProveedor?.value || '';
+      const soloListos = filtroListo?.checked || false;
+
+      document.querySelectorAll('#tbody-liq tr').forEach((tr) => {
+        let visible = true;
+        const fecha = tr.dataset.fecha || '';
+        if (desde) {
+          if (!fecha || fecha < desde) {
+            visible = false;
+          }
+        }
+        if (visible && hasta) {
+          if (!fecha || fecha > hasta) {
+            visible = false;
+          }
+        }
+        if (visible && proveedor) {
+          if (tr.dataset.proveedorId !== proveedor) {
+            visible = false;
+          }
+        }
+        if (visible && soloListos) {
+          if (tr.dataset.listo !== 'true') {
+            visible = false;
+          }
+        }
+        tr.style.display = visible ? '' : 'none';
+      });
+    }
+
+    function limpiarFiltros() {
+      if (filtroFechaDesde) filtroFechaDesde.value = '';
+      if (filtroFechaHasta) filtroFechaHasta.value = '';
+      if (filtroProveedor) filtroProveedor.value = '';
+      if (filtroListo) filtroListo.checked = false;
+      aplicarFiltros();
+    }
+
+    btnFiltros?.addEventListener('click', () => {
+      if (!panelFiltros) return;
+      const estabaOculto = panelFiltros.hasAttribute('hidden');
+      panelFiltros.toggleAttribute('hidden');
+      btnFiltros.setAttribute('aria-expanded', estabaOculto ? 'true' : 'false');
+      if (estabaOculto) {
+        aplicarFiltros();
+      }
+    });
+
+    document.getElementById('btn-aplicar-filtros')?.addEventListener('click', aplicarFiltros);
+    document.getElementById('btn-limpiar-filtros')?.addEventListener('click', limpiarFiltros);
+
+    [filtroFechaDesde, filtroFechaHasta, filtroProveedor, filtroListo].forEach((elemento) => {
+      elemento?.addEventListener('change', aplicarFiltros);
+    });
 
     async function validarFilas() {
       mostrarMensaje('Validando…', 'info');
