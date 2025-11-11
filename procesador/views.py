@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 import xml.etree.ElementTree as ET
 import pandas as pd
 from django.contrib import messages
+from django.contrib.auth import logout
 from django.contrib.auth.decorators import login_required
 from django.db import connection
 from django.db.utils import DatabaseError, ProgrammingError
@@ -222,11 +223,12 @@ def seleccionar_empresa(request):
         .order_by("empresa__nombre")
     )
     if not permisos.exists():
+        logout(request)
         messages.error(
             request,
             "No tienes empresas asignadas. Contacta con un administrador para obtener acceso.",
         )
-        return redirect("logout")
+        return redirect("login")
 
     if request.method == "POST":
         empresa_id = request.POST.get("empresa_id")

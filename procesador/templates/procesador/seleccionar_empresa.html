@@ -48,7 +48,10 @@
     </form>
 
     <div class="acciones">
-      <a href="{% url 'logout' %}" style="color:#c0392b; text-decoration:none;">Cerrar sesión</a>
+      <form method="post" action="{% url 'logout' %}">
+        {% csrf_token %}
+        <button type="submit" style="background:none; border:none; color:#c0392b; text-decoration:underline; cursor:pointer; font:inherit; padding:0;">Cerrar sesión</button>
+      </form>
     </div>
   </main>
 </body>

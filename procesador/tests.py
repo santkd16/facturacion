@@ -384,3 +384,20 @@ class DescargarLiquidacionCSVTests(EmpresaTestMixin, TestCase):
         fila = self._obtener_primera_fila()
 
         self.assertEqual(fila["Fecha"], "")
+
+
+class LogoutFlowTests(EmpresaTestMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.autenticar()
+
+    def test_logout_via_post(self):
+        response = self.client.post(reverse("logout"))
+        self.assertRedirects(response, reverse("login"), fetch_redirect_response=False)
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_seleccionar_empresa_sin_permisos_redirige_a_login(self):
+        PermisoEmpresa.objects.filter(usuario=self.usuario).delete()
+        response = self.client.get(reverse("seleccionar_empresa"))
+        self.assertRedirects(response, reverse("login"))
+        self.assertNotIn("_auth_user_id", self.client.session)

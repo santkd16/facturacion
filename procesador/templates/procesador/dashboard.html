@@ -24,7 +24,12 @@
     <div style="text-align:right; font-size:0.9rem;">
       <p style="margin:0;">{{ request.user.get_full_name|default:request.user.username }}</p>
       <a href="{% url 'seleccionar_empresa' %}" style="color:#fff; text-decoration:underline; margin-right:1rem;">Cambiar empresa</a>
-      <a href="{% url 'logout' %}" style="color:#fff; text-decoration:underline;">Cerrar sesión</a>
+      <form method="post" action="{% url 'logout' %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" style="background:none; border:none; color:#fff; text-decoration:underline; cursor:pointer; padding:0; font:inherit;">
+          Cerrar sesión
+        </button>
+      </form>
     </div>
   </header>
 
