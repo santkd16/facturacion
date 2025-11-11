@@ -608,6 +608,33 @@ class LiquidacionExportarTests(LiquidacionTestBase):
             fila_csv["Total neto – Cuenta contable"],
             self.cuentas["TOTAL_NETO"].codigo,
         )
+        self.assertEqual(fila_csv["INC – Cuenta contable"], "N/A")
+
+    def test_exporta_csv_valor_cero_generar_na(self):
+        fila = self.build_fila_payload()
+        fila["importes"]["iva"] = self._format_decimal(Decimal("0.00"))
+        payload = quote(json.dumps({"filas": [fila]}))
+        url = reverse("liquidacion_exportar") + f"?formato=csv&payload={payload}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        contenido = response.content.decode("utf-8").splitlines()
+        reader = csv.DictReader(contenido)
+        fila_csv = next(reader)
+
+        self.assertEqual(fila_csv["IVA – Cuenta contable"], "N/A")
+
+    def test_exporta_csv_campo_vacio_generar_na(self):
+        fila = self.build_fila_payload()
+        fila["cuentas"]["inc"] = None
+        payload = quote(json.dumps({"filas": [fila]}))
+        url = reverse("liquidacion_exportar") + f"?formato=csv&payload={payload}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        contenido = response.content.decode("utf-8").splitlines()
+        reader = csv.DictReader(contenido)
+        fila_csv = next(reader)
+
+        self.assertEqual(fila_csv["INC – Cuenta contable"], "N/A")
 
 
 class LogoutFlowTests(EmpresaTestMixin, TestCase):

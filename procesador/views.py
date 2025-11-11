@@ -360,6 +360,7 @@ def dashboard(request):
     }
 
     liquidacion_filas = []
+    proveedores_filtros: set[tuple[int, str]] = set()
     for factura in facturas_xls:
         subtotal = (
             _parse_decimal(factura.total)
@@ -389,32 +390,42 @@ def dashboard(request):
 
         total_neto_base = subtotal + iva + inc
 
-        liquidacion_filas.append(
-            {
-                "factura_id": factura.id,
-                "tipo_documento": factura.tipo_documento,
-                "cufe": factura.cufe,
-                "nit": nit,
-                "proveedor_nombre": proveedor_nombre,
-                "proveedor_id": proveedor.id if proveedor else None,
-                "fecha": fecha_excel_str,
-                "descripcion": descripcion,
-                "descripcion_display": descripcion_display,
-                "prefijo_folio": prefijo_folio,
-                "subtotal": _decimal_to_str(subtotal),
-                "subtotal_raw": str(subtotal),
-                "iva": _decimal_to_str(iva),
-                "iva_raw": str(iva),
-                "inc": _decimal_to_str(inc),
-                "inc_raw": str(inc),
-                "retefuente": "0.00",
-                "reteica": "0.00",
-                "reteiva": "0.00",
-                "total_neto": _decimal_to_str(total_neto_base),
-                "total_neto_raw": str(total_neto_base),
-                "coincide_xml": factura_xml is not None,
-            }
+        liquidacion_fila = {
+            "factura_id": factura.id,
+            "tipo_documento": factura.tipo_documento,
+            "cufe": factura.cufe,
+            "nit": nit,
+            "proveedor_nombre": proveedor_nombre,
+            "proveedor_id": proveedor.id if proveedor else None,
+            "fecha": fecha_excel_str,
+            "descripcion": descripcion,
+            "descripcion_display": descripcion_display,
+            "prefijo_folio": prefijo_folio,
+            "subtotal": _decimal_to_str(subtotal),
+            "subtotal_raw": str(subtotal),
+            "iva": _decimal_to_str(iva),
+            "iva_raw": str(iva),
+            "inc": _decimal_to_str(inc),
+            "inc_raw": str(inc),
+            "retefuente": "0.00",
+            "reteica": "0.00",
+            "reteiva": "0.00",
+            "total_neto": _decimal_to_str(total_neto_base),
+            "total_neto_raw": str(total_neto_base),
+            "coincide_xml": factura_xml is not None,
+        }
+
+        if proveedor is not None:
+            proveedores_filtros.add((proveedor.id, proveedor_nombre))
+
+        liquidacion_filas.append(liquidacion_fila)
+
+    proveedores_filtros_list = [
+        {"id": proveedor_id, "nombre": nombre}
+        for proveedor_id, nombre in sorted(
+            proveedores_filtros, key=lambda item: item[1].lower()
         )
+    ]
 
     return render(
         request,
@@ -426,6 +437,7 @@ def dashboard(request):
             "facturas_xml": facturas_xml,
             "facturas_xls": facturas_xls,
             "liquidacion_filas": liquidacion_filas,
+            "liquidacion_proveedores": proveedores_filtros_list,
             "liquidacion_casilla_help": CASILLA_HELP_TEXT,
         },
     )
@@ -492,6 +504,7 @@ def _validar_filas_liquidacion(
             opciones = catalogos_por_clave.get((proveedor_id, casilla), [])
             catalogo = None
             catalogo_valido = True
+            sin_opciones = not opciones
 
             if monto != Decimal("0"):
                 if not opciones:
@@ -590,6 +603,7 @@ def _validar_filas_liquidacion(
                     if catalogo_valido and catalogo is not None
                     else CASILLA_RULES[casilla]["naturaleza"]
                 ),
+                "sin_opciones": sin_opciones,
             }
 
             if (
@@ -834,7 +848,20 @@ def liquidacion_exportar(request):
         def obtener_cuenta(casilla: str) -> str:
             info = casillas.get(casilla, {})
             catalogo = info.get("catalogo")
-            return catalogo.cuenta.codigo if catalogo else ""
+            if info.get("sin_opciones"):
+                return "N/A"
+            valor = info.get("valor")
+            if valor is None:
+                valor = info.get("monto")
+            if isinstance(valor, Decimal):
+                valor_decimal = valor
+            else:
+                valor_decimal = _parse_decimal(valor)
+            if valor_decimal == Decimal("0"):
+                return "N/A"
+            if not catalogo:
+                return "N/A"
+            return catalogo.cuenta.codigo
 
         def obtener_monto(casilla: str) -> Decimal:
             info = casillas.get(casilla, {})
