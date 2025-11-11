@@ -1,10 +1,12 @@
 import csv
+import json
 import os
 import tempfile
 import zipfile
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
+from urllib.parse import quote
 
 import pandas as pd
 from django.contrib.auth import get_user_model
@@ -13,6 +15,8 @@ from django.test import TestCase
 from django.urls import reverse
 
 from .models import (
+    CuentaContable,
+    CuentaContableProveedor,
     Empresa,
     FacturaXML,
     FacturaXLS,
@@ -319,71 +323,291 @@ class DashboardFechaExcelTests(EmpresaTestMixin, TestCase):
         # Y también debe serializarse para la liquidación cuando coincide el CUFE.
         self.assertIn('data-fecha="2024-05-02"', contenido)
 
-class DescargarLiquidacionCSVTests(EmpresaTestMixin, TestCase):
+class LiquidacionTestBase(EmpresaTestMixin, TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.proveedor = Proveedor.objects.create(
+            empresa=cls.empresa,
+            nit="900888777",
+            nombre="Proveedor Liquidación",
+        )
+
+        cls.cuentas = {
+            "SUBTOTAL": CuentaContable.objects.create(
+                codigo="2310001000", descripcion="Compras"
+            ),
+            "IVA": CuentaContable.objects.create(
+                codigo="2408001000", descripcion="IVA compras"
+            ),
+            "INC": CuentaContable.objects.create(
+                codigo="231053152007", descripcion="INC"
+            ),
+            "RETEFUENTE": CuentaContable.objects.create(
+                codigo="2365001000", descripcion="ReteFuente"
+            ),
+            "RETEICA": CuentaContable.objects.create(
+                codigo="2368001000", descripcion="ReteICA"
+            ),
+            "RETEIVA": CuentaContable.objects.create(
+                codigo="2367001000", descripcion="ReteIVA"
+            ),
+            "TOTAL_NETO": CuentaContable.objects.create(
+                codigo="2335001000", descripcion="Cuentas por pagar"
+            ),
+        }
+
+        cls.parametros = {
+            "SUBTOTAL": CuentaContableProveedor.objects.create(
+                proveedor=cls.proveedor,
+                cuenta=cls.cuentas["SUBTOTAL"],
+                casilla=CuentaContableProveedor.Casilla.SUBTOTAL,
+                naturaleza="D",
+            ),
+            "IVA": CuentaContableProveedor.objects.create(
+                proveedor=cls.proveedor,
+                cuenta=cls.cuentas["IVA"],
+                casilla=CuentaContableProveedor.Casilla.IVA,
+                naturaleza="D",
+            ),
+            "INC": CuentaContableProveedor.objects.create(
+                proveedor=cls.proveedor,
+                cuenta=cls.cuentas["INC"],
+                casilla=CuentaContableProveedor.Casilla.INC,
+                naturaleza="D",
+            ),
+            "RETEFUENTE": CuentaContableProveedor.objects.create(
+                proveedor=cls.proveedor,
+                cuenta=cls.cuentas["RETEFUENTE"],
+                casilla=CuentaContableProveedor.Casilla.RETEFUENTE,
+                naturaleza="C",
+                porcentaje=Decimal("4.0000"),
+            ),
+            "RETEICA": CuentaContableProveedor.objects.create(
+                proveedor=cls.proveedor,
+                cuenta=cls.cuentas["RETEICA"],
+                casilla=CuentaContableProveedor.Casilla.RETEICA,
+                naturaleza="C",
+                porcentaje=Decimal("9.5000"),
+                modo_calculo=CuentaContableProveedor.ModoCalculo.PORCENTAJE,
+            ),
+            "RETEIVA": CuentaContableProveedor.objects.create(
+                proveedor=cls.proveedor,
+                cuenta=cls.cuentas["RETEIVA"],
+                casilla=CuentaContableProveedor.Casilla.RETEIVA,
+                naturaleza="C",
+                porcentaje=Decimal("15.0000"),
+            ),
+            "TOTAL_NETO": CuentaContableProveedor.objects.create(
+                proveedor=cls.proveedor,
+                cuenta=cls.cuentas["TOTAL_NETO"],
+                casilla=CuentaContableProveedor.Casilla.TOTAL_NETO,
+                naturaleza="D",
+            ),
+        }
+
     def setUp(self):
         super().setUp()
         self.autenticar()
-        self.proveedor = Proveedor.objects.create(
+        self.factura_xml = FacturaXML.objects.create(
             empresa=self.empresa,
-            nit="900888777",
-            nombre="Proveedor CSV",
-        )
-
-    def _crear_factura_xml(self, cufe: str) -> FacturaXML:
-        return FacturaXML.objects.create(
-            empresa=self.empresa,
-            cufe=cufe,
-            fecha=date(2024, 1, 15),
-            descripcion="Servicio demo",
+            cufe="CUFE-LIQ-1",
+            fecha=date(2024, 1, 10),
+            descripcion="Servicios",
             subtotal=Decimal("100.00"),
             iva=Decimal("19.00"),
-            total=Decimal("119.00"),
+            total=Decimal("134.50"),
             proveedor=self.proveedor,
         )
-
-    def _crear_factura_xls(
-        self,
-        cufe: str,
-        *,
-        fecha_documento: date | None,
-    ) -> FacturaXLS:
-        return FacturaXLS.objects.create(
+        self.factura_xls = FacturaXLS.objects.create(
             empresa=self.empresa,
             tipo_documento="Factura electrónica",
-            cufe=cufe,
+            cufe="CUFE-LIQ-1",
             folio="001",
             prefijo="PRF",
-            nit_emisor="900888777",
-            nombre_emisor="Proveedor CSV",
-            fecha_documento=fecha_documento,
+            nit_emisor=self.proveedor.nit,
+            nombre_emisor=self.proveedor.nombre,
+            fecha_documento=date(2024, 1, 12),
             iva=Decimal("19.00"),
             inc=Decimal("0.00"),
-            total=Decimal("119.00"),
+            total=Decimal("134.50"),
             activo=True,
         )
 
-    def _obtener_primera_fila(self) -> dict[str, str]:
-        response = self.client.get(reverse("descargar_liquidacion"))
+    @staticmethod
+    def _format_decimal(value: Decimal, places: int = 2) -> str:
+        quantum = Decimal(1).scaleb(-places)
+        return f"{value.quantize(quantum)}"
+
+    def build_fila_payload(self, **overrides) -> dict:
+        subtotal = Decimal("100.00")
+        iva = Decimal("19.00")
+        inc = Decimal("0.00")
+        retefuente = subtotal * Decimal("4.0000") / Decimal("100")
+        reteica = subtotal * Decimal("9.5000") / Decimal("100")
+        reteiva = subtotal * Decimal("15.0000") / Decimal("100")
+        total_neto = subtotal + iva + inc - retefuente - reteica - reteiva
+
+        fila = {
+            "factura_id": self.factura_xls.id,
+            "proveedor_id": self.proveedor.id,
+            "tipo_documento": self.factura_xls.tipo_documento,
+            "cufe": self.factura_xls.cufe,
+            "nit": self.proveedor.nit,
+            "proveedor": self.proveedor.nombre,
+            "fecha": "2024-01-12",
+            "descripcion": "Servicios",
+            "prefijo_folio": "PRF-001",
+            "importes": {
+                "subtotal": self._format_decimal(subtotal),
+                "iva": self._format_decimal(iva),
+                "inc": self._format_decimal(inc),
+                "retefuente": self._format_decimal(retefuente),
+                "reteica": self._format_decimal(reteica),
+                "reteiva": self._format_decimal(reteiva),
+                "total_neto": self._format_decimal(total_neto),
+            },
+            "cuentas": {
+                "subtotal": self.parametros["SUBTOTAL"].id,
+                "iva": self.parametros["IVA"].id,
+                "inc": self.parametros["INC"].id,
+                "retefuente": self.parametros["RETEFUENTE"].id,
+                "reteica": self.parametros["RETEICA"].id,
+                "reteiva": self.parametros["RETEIVA"].id,
+                "total_neto": self.parametros["TOTAL_NETO"].id,
+            },
+            "porcentajes": {
+                "retefuente": self._format_decimal(Decimal("4.0000"), 4),
+                "reteica": self._format_decimal(Decimal("9.5000"), 4),
+                "reteiva": self._format_decimal(Decimal("15.0000"), 4),
+            },
+        }
+        for key, value in overrides.items():
+            fila[key] = value
+        return fila
+
+
+class LiquidacionCatalogosViewTests(LiquidacionTestBase):
+    def test_devuelve_catalogos_filtrados(self):
+        url = reverse("liquidacion_catalogos", args=[self.proveedor.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("catalogos", data)
+        catalogos = data["catalogos"]
+        self.assertEqual(len(catalogos["subtotales"]), 1)
+        self.assertEqual(
+            catalogos["subtotales"][0]["codigo"], self.cuentas["SUBTOTAL"].codigo
+        )
+        self.assertEqual(len(catalogos["retefuente"]), 1)
+        self.assertEqual(
+            catalogos["retefuente"][0]["porcentaje"],
+            self._format_decimal(Decimal("4.0000"), 4),
+        )
+
+    def test_proveedor_inexistente(self):
+        url = reverse("liquidacion_catalogos", args=[9999])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+
+class LiquidacionValidacionTests(LiquidacionTestBase):
+    def test_validacion_exitosa(self):
+        fila = self.build_fila_payload()
+        response = self.client.post(
+            reverse("liquidacion_validar"),
+            data=json.dumps({"filas": [fila]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["valido"])
+        self.assertEqual(len(data["filas"]), 1)
+        resultado = data["filas"][0]
+        self.assertEqual(
+            resultado["cuentas"]["subtotal"], self.parametros["SUBTOTAL"].id
+        )
+        self.assertEqual(resultado["porcentajes"]["retefuente"], "4.0000")
+
+    def test_error_por_cuenta_obligatoria(self):
+        fila = self.build_fila_payload()
+        fila["cuentas"]["subtotal"] = None
+        response = self.client.post(
+            reverse("liquidacion_validar"),
+            data=json.dumps({"filas": [fila]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertFalse(data.get("valido", False))
+        mensajes = " ".join(error["mensaje"] for error in data["errores"])
+        self.assertIn("El campo ‘Cuenta contable’ es obligatorio", mensajes)
+
+    def test_error_por_cuenta_de_otro_proveedor(self):
+        otro_proveedor = Proveedor.objects.create(
+            empresa=self.empresa, nit="800123456", nombre="Proveedor 2"
+        )
+        cuenta_otro = CuentaContable.objects.create(
+            codigo="2310999999", descripcion="Subtotal otro"
+        )
+        parametro_otro = CuentaContableProveedor.objects.create(
+            proveedor=otro_proveedor,
+            cuenta=cuenta_otro,
+            casilla=CuentaContableProveedor.Casilla.SUBTOTAL,
+            naturaleza="D",
+        )
+        fila = self.build_fila_payload()
+        fila["cuentas"]["subtotal"] = parametro_otro.id
+        response = self.client.post(
+            reverse("liquidacion_validar"),
+            data=json.dumps({"filas": [fila]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        mensajes = " ".join(error["mensaje"] for error in data["errores"])
+        self.assertIn("La cuenta seleccionada no pertenece al proveedor", mensajes)
+
+    def test_error_por_falta_parametrizacion_retefuente(self):
+        self.parametros["RETEFUENTE"].delete()
+        fila = self.build_fila_payload()
+        response = self.client.post(
+            reverse("liquidacion_validar"),
+            data=json.dumps({"filas": [fila]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        mensajes = " ".join(error["mensaje"] for error in data["errores"])
+        self.assertIn("El proveedor no tiene parametrizadas opciones para ReteFuente", mensajes)
+
+
+class LiquidacionExportarTests(LiquidacionTestBase):
+    def test_exporta_csv_con_cuentas(self):
+        fila = self.build_fila_payload()
+        payload = quote(json.dumps({"filas": [fila]}))
+        url = reverse("liquidacion_exportar") + f"?formato=csv&payload={payload}"
+        response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         contenido = response.content.decode("utf-8").splitlines()
         reader = csv.DictReader(contenido)
-        return next(reader)
+        self.assertEqual(len(reader.fieldnames), 24)
+        fila_csv = next(reader)
 
-    def test_prefiere_fecha_excel_en_csv(self):
-        self._crear_factura_xml("CSV-1")
-        self._crear_factura_xls("CSV-1", fecha_documento=date(2024, 2, 5))
-
-        fila = self._obtener_primera_fila()
-
-        self.assertEqual(fila["Fecha"], "2024-02-05")
-
-    def test_no_usa_fecha_xml_si_excel_no_tiene(self):
-        self._crear_factura_xml("CSV-2")
-        self._crear_factura_xls("CSV-2", fecha_documento=None)
-
-        fila = self._obtener_primera_fila()
-
-        self.assertEqual(fila["Fecha"], "")
+        self.assertEqual(
+            fila_csv["Sub total – Cuenta contable"],
+            self.cuentas["SUBTOTAL"].codigo,
+        )
+        self.assertEqual(fila_csv["ReteFuente – Cuenta contable"], self.cuentas["RETEFUENTE"].codigo)
+        self.assertEqual(fila_csv["ReteFuente (%)"], "4.0000")
+        self.assertEqual(fila_csv["Tipo documento"], self.factura_xls.tipo_documento)
+        self.assertEqual(fila_csv["CUFE/CUDE"], self.factura_xls.cufe)
+        self.assertEqual(fila_csv["ReteFuente (valor)"], "-4.00")
+        self.assertEqual(fila_csv["Total neto"], "90.50")
+        self.assertEqual(
+            fila_csv["Total neto – Cuenta contable"],
+            self.cuentas["TOTAL_NETO"].codigo,
+        )
 
 
 class LogoutFlowTests(EmpresaTestMixin, TestCase):

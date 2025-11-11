@@ -13,6 +13,19 @@
     th, td { border:1px solid #ddd; padding:.4rem; font-size:.95rem; }
     tfoot td { font-weight:600; }
     .w-110{ min-width:110px; }
+    .btn-primario, .btn-secundario {
+      border-radius:4px; padding:.4rem .75rem; cursor:pointer; font-size:.95rem;
+    }
+    .btn-primario { background:#1d70b8; color:#fff; border:1px solid #1d70b8; }
+    .btn-secundario { background:#fff; color:#1d70b8; border:1px solid #1d70b8; }
+    .btn-secundario:hover { background:#eaf2fb; }
+    .btn-primario:hover { background:#155a8c; }
+    td.cuenta { min-width:220px; vertical-align:top; }
+    td.cuenta select { width:100%; }
+    td.cuenta .ayuda { display:block; font-size:0.75rem; color:#555; margin-top:0.25rem; }
+    td.cuenta .alerta { display:block; font-size:0.75rem; color:#c0392b; margin-top:0.25rem; }
+    td.valor, td.valor-retencion { text-align:right; }
+    td.porcentaje { text-align:right; min-width:90px; }
   </style>
 </head>
 <body>
@@ -140,78 +153,136 @@
   <!-- NUEVO: LIQUIDACIÓN -->
   <div id="tabla-liq" class="tabla-contenido tabla-oculta" role="tabpanel"
        aria-labelledby="tab-liq" hidden>
-    <div style="display:flex; justify-content:space-between; align-items:center;">
-      <h2>Liquidación de facturas</h2>
-      <form id="form-liq" method="post" action="{% url 'descargar_liquidacion' %}">
-        {% csrf_token %}
-        <input type="hidden" name="rows_json" id="rows-json" value="[]">
-        <button type="submit">Descargar CSV</button>
-      </form>
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem;">
+      <h2 style="margin:0;">Liquidación de facturas</h2>
+      <div style="display:flex; gap:.5rem;">
+        <button type="button" id="btn-validar" class="btn-primario">Validar selección</button>
+        <button type="button" id="btn-exportar" class="btn-secundario">Descargar CSV</button>
+      </div>
     </div>
 
-    <table>
-      <thead>
-        <tr>
-          <th>Tipo documento</th><th>CUFE/CUDE</th><th>NIT</th><th>Proveedor</th>
-          <th>Fecha</th><th>Descripción</th><th>Prefijo + Folio</th>
-          <th class="w-110">Sub total</th><th class="w-110">IVA</th>
-          <th class="w-110">INC</th><th class="w-110">ReteFuente (%)</th>
-          <th class="w-110">ReteFuente</th><th class="w-110">ReteICA (%)</th>
-          <th class="w-110">ReteICA</th><th class="w-110">Total neto</th>
-        </tr>
-      </thead>
-      <tbody id="tbody-liq">
-        {% for item in liquidaciones %}
-        <tr
-          data-tipo-documento="{{ item.factura.tipo_documento }}"
-          data-cufe="{{ item.factura.cufe }}"
-          data-nit="{{ item.nit }}"
-          data-proveedor="{{ item.proveedor_nombre }}"
-          data-fecha="{{ item.fecha_excel_str }}"
-          data-fecha-xml="{{ item.fecha_xml|date:'Y-m-d' }}"
-          data-prefijo-folio="{{ item.prefijo_folio }}"
-          data-descripcion="{{ item.descripcion|default:'' }}"
-          data-coincide-xml="{{ item.coincide_xml|yesno:'si,no' }}"
-        >
-          <td>{{ item.factura.tipo_documento }}</td>
-          <td>{{ item.factura.cufe }}</td>
-          <td>{{ item.nit }}</td>
-          <td>{{ item.proveedor_nombre }}</td>
-          <td>{{ item.fecha_excel_str }}</td>
-          <td>
-            {% if item.coincide_xml %}
-              {{ item.descripcion_display }}
-            {% else %}
-              <span style="color:#c00; font-weight:600;">{{ item.descripcion_display }}</span>
-            {% endif %}
-          </td>
-          <td>{{ item.prefijo_folio }}</td>
-          <td data-sub="{{ item.subtotal }}">{{ item.subtotal|floatformat:2 }}</td>
-          <td data-iva="{{ item.factura.iva }}">{{ item.factura.iva|floatformat:2 }}</td>
-          <td data-inc="{{ item.factura.inc }}">{{ item.factura.inc|floatformat:2 }}</td>
-          <td>
-            <select class="rf">
-              {% for rf in item.opciones_rf %}
-              <option value="{{ rf }}" {% if rf == item.retefuente_default %}selected{% endif %}>{{ rf }}</option>
-              {% endfor %}
-            </select>
-          </td>
-          <td class="retefuente-valor">0.00</td>
-          <td>
-            <select class="ica">
-              {% for ica in item.opciones_ica %}
-              <option value="{{ ica }}" {% if ica == item.reteica_default %}selected{% endif %}>{{ ica }}</option>
-              {% endfor %}
-            </select>
-          </td>
-          <td class="reteica-valor">0.00</td>
-          <td class="total-neto">0.00</td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="14">No hay datos para liquidación.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div id="liquidacion-mensajes" role="status" aria-live="polite" style="margin:.75rem 0;"></div>
+
+    <div style="overflow-x:auto;">
+      <table id="tabla-liquidacion">
+        <thead>
+          <tr>
+            <th>Tipo documento</th>
+            <th>CUFE/CUDE</th>
+            <th>NIT</th>
+            <th>Proveedor</th>
+            <th>Fecha</th>
+            <th>Descripción</th>
+            <th>Prefijo + Folio</th>
+            <th>Sub total</th>
+            <th>Sub total – Cuenta contable</th>
+            <th>IVA</th>
+            <th>IVA – Cuenta contable</th>
+            <th>INC</th>
+            <th>INC – Cuenta contable</th>
+            <th>ReteFuente (%)</th>
+            <th>ReteFuente (valor)</th>
+            <th>ReteFuente – Cuenta contable</th>
+            <th>ReteICA (%)</th>
+            <th>ReteICA (valor)</th>
+            <th>ReteICA – Cuenta contable</th>
+            <th>ReteIva (%)</th>
+            <th>ReteIva (valor)</th>
+            <th>ReteIva – Cuenta contable</th>
+            <th>Total neto</th>
+            <th>Total neto – Cuenta contable</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-liq">
+          {% for fila in liquidacion_filas %}
+          <tr
+            data-factura-id="{{ fila.factura_id }}"
+            data-proveedor-id="{{ fila.proveedor_id|default:'' }}"
+            data-tipo-documento="{{ fila.tipo_documento }}"
+            data-cufe="{{ fila.cufe }}"
+            data-nit="{{ fila.nit }}"
+            data-proveedor="{{ fila.proveedor_nombre }}"
+            data-fecha="{{ fila.fecha }}"
+            data-descripcion="{{ fila.descripcion|default:'' }}"
+            data-prefijo-folio="{{ fila.prefijo_folio|default:'' }}"
+            data-subtotal="{{ fila.subtotal_raw }}"
+            data-iva="{{ fila.iva_raw }}"
+            data-inc="{{ fila.inc_raw }}"
+            data-total-neto-base="{{ fila.total_neto_raw }}"
+          >
+            <td>{{ fila.tipo_documento }}</td>
+            <td>{{ fila.cufe }}</td>
+            <td>{{ fila.nit }}</td>
+            <td>{{ fila.proveedor_nombre }}</td>
+            <td>{{ fila.fecha }}</td>
+            <td>{{ fila.descripcion_display }}</td>
+            <td>{{ fila.prefijo_folio }}</td>
+            <td class="valor" data-campo="SUBTOTAL">{{ fila.subtotal }}</td>
+            <td class="cuenta">
+              <select class="cuenta-select" data-casilla="SUBTOTAL">
+                <option value="">Seleccione cuenta</option>
+              </select>
+              <small class="ayuda">{{ liquidacion_casilla_help.SUBTOTAL }}</small>
+              <small class="alerta" hidden></small>
+            </td>
+            <td class="valor" data-campo="IVA">{{ fila.iva }}</td>
+            <td class="cuenta">
+              <select class="cuenta-select" data-casilla="IVA">
+                <option value="">Seleccione cuenta</option>
+              </select>
+              <small class="ayuda">{{ liquidacion_casilla_help.IVA }}</small>
+              <small class="alerta" hidden></small>
+            </td>
+            <td class="valor" data-campo="INC">{{ fila.inc }}</td>
+            <td class="cuenta">
+              <select class="cuenta-select" data-casilla="INC">
+                <option value="">Seleccione cuenta</option>
+              </select>
+              <small class="ayuda">{{ liquidacion_casilla_help.INC }}</small>
+              <small class="alerta" hidden></small>
+            </td>
+            <td class="porcentaje" data-casilla="RETEFUENTE">0.0000</td>
+            <td class="valor-retencion" data-casilla="RETEFUENTE">0.00</td>
+            <td class="cuenta">
+              <select class="cuenta-select" data-casilla="RETEFUENTE">
+                <option value="">Seleccione cuenta</option>
+              </select>
+              <small class="ayuda">{{ liquidacion_casilla_help.RETEFUENTE }}</small>
+              <small class="alerta" hidden></small>
+            </td>
+            <td class="porcentaje" data-casilla="RETEICA">0.0000</td>
+            <td class="valor-retencion" data-casilla="RETEICA">0.00</td>
+            <td class="cuenta">
+              <select class="cuenta-select" data-casilla="RETEICA">
+                <option value="">Seleccione cuenta</option>
+              </select>
+              <small class="ayuda">{{ liquidacion_casilla_help.RETEICA }}</small>
+              <small class="alerta" hidden></small>
+            </td>
+            <td class="porcentaje" data-casilla="RETEIVA">0.0000</td>
+            <td class="valor-retencion" data-casilla="RETEIVA">0.00</td>
+            <td class="cuenta">
+              <select class="cuenta-select" data-casilla="RETEIVA">
+                <option value="">Seleccione cuenta</option>
+              </select>
+              <small class="ayuda">{{ liquidacion_casilla_help.RETEIVA }}</small>
+              <small class="alerta" hidden></small>
+            </td>
+            <td class="valor" data-campo="TOTAL_NETO">{{ fila.total_neto }}</td>
+            <td class="cuenta">
+              <select class="cuenta-select" data-casilla="TOTAL_NETO">
+                <option value="">Seleccione cuenta</option>
+              </select>
+              <small class="ayuda">{{ liquidacion_casilla_help.TOTAL_NETO }}</small>
+              <small class="alerta" hidden></small>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="24">No hay datos para liquidación.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <script>
@@ -231,83 +302,278 @@
       });
     })();
 
-    // Cálculo Total Neto = subtotal + iva + inc - (subtotal*rf/100) - (subtotal*ica/100)
-    function recalcularFila(tr) {
-      const sub = parseFloat(tr.querySelector('[data-sub]').dataset.sub || '0') || 0;
-      const iva = parseFloat(tr.querySelector('[data-iva]').dataset.iva || '0') || 0;
-      const inc = parseFloat(tr.querySelector('[data-inc]').dataset.inc || '0') || 0;
-      const rf = parseFloat(tr.querySelector('select.rf').value || '0') || 0;
-      const ica = parseFloat(tr.querySelector('select.ica').value || '0') || 0;
-      const retefuente = sub * rf / 100.0;
-      const reteica = sub * ica / 100.0;
-      const neto = (sub + iva + inc) - retefuente - reteica;
-      const rfCell = tr.querySelector('.retefuente-valor');
-      const icaCell = tr.querySelector('.reteica-valor');
-      if (rfCell) {
-        rfCell.textContent = retefuente.toFixed(2);
-      }
-      if (icaCell) {
-        icaCell.textContent = reteica.toFixed(2);
-      }
-      tr.querySelector('.total-neto').textContent = neto.toFixed(2);
-    }
+    const CSRF_TOKEN = '{{ csrf_token }}';
+    const CASILLA_KEYS = {
+      SUBTOTAL: 'subtotales',
+      IVA: 'iva',
+      INC: 'inc',
+      RETEFUENTE: 'retefuente',
+      RETEICA: 'reteica',
+      RETEIVA: 'reteiva',
+      TOTAL_NETO: 'totalneto',
+    };
+    const RETENCIONES = new Set(['RETEFUENTE', 'RETEICA', 'RETEIVA']);
+    const catalogCache = new Map();
 
-    function recalcularTodo() {
-      document.querySelectorAll('#tbody-liq tr').forEach(recalcularFila);
-    }
-
-    document.addEventListener('change', (e) => {
-      if (e.target.closest('#tbody-liq select')) {
-        const tr = e.target.closest('tr');
-        recalcularFila(tr);
-      }
-    });
-
-    const formLiq = document.getElementById('form-liq');
-    if (formLiq) {
-      formLiq.addEventListener('submit', () => {
-        const rows = [];
-        document.querySelectorAll('#tbody-liq tr').forEach((tr) => {
-          const subCell = tr.querySelector('[data-sub]');
-          const ivaCell = tr.querySelector('[data-iva]');
-          const incCell = tr.querySelector('[data-inc]');
-          const rfSelect = tr.querySelector('select.rf');
-          const icaSelect = tr.querySelector('select.ica');
-          const sub = parseFloat(subCell ? subCell.dataset.sub || '0' : '0') || 0;
-          const iva = parseFloat(ivaCell ? ivaCell.dataset.iva || '0' : '0') || 0;
-          const inc = parseFloat(incCell ? incCell.dataset.inc || '0' : '0') || 0;
-          const rfPct = parseFloat(rfSelect ? rfSelect.value || '0' : '0') || 0;
-          const icaPct = parseFloat(icaSelect ? icaSelect.value || '0' : '0') || 0;
-          const retefuente = sub * rfPct / 100.0;
-          const reteica = sub * icaPct / 100.0;
-          const totalNeto = (sub + iva + inc) - retefuente - reteica;
-          rows.push({
-            tipo_documento: tr.dataset.tipoDocumento || '',
-            cufe: tr.dataset.cufe || '',
-            nit: tr.dataset.nit || '',
-            proveedor: tr.dataset.proveedor || '',
-            fecha: tr.dataset.fecha || '',
-            descripcion: tr.dataset.descripcion || '',
-            prefijo_folio: tr.dataset.prefijoFolio || '',
-            subtotal: sub.toFixed(2),
-            iva: iva.toFixed(2),
-            inc: inc.toFixed(2),
-            retefuente_pct: rfPct.toFixed(2),
-            reteica_pct: icaPct.toFixed(2),
-            retefuente: retefuente.toFixed(2),
-            reteica: reteica.toFixed(2),
-            total_neto: totalNeto.toFixed(2),
-          });
-        });
-        const hiddenInput = document.getElementById('rows-json');
-        if (hiddenInput) {
-          hiddenInput.value = JSON.stringify(rows);
-        }
+    function formatearNumero(valor, decimales = 2) {
+      return Number(valor || 0).toLocaleString('es-CO', {
+        minimumFractionDigits: decimales,
+        maximumFractionDigits: decimales,
       });
     }
 
-    // Recalcular al cargar
-    window.addEventListener('DOMContentLoaded', recalcularTodo);
+    function mostrarMensaje(contenido, tipo = 'info') {
+      const contenedor = document.getElementById('liquidacion-mensajes');
+      if (!contenedor) return;
+      if (!contenido) {
+        contenedor.innerHTML = '';
+        return;
+      }
+      const colores = {
+        error: '#fdecea',
+        info: '#eef5fb',
+        success: '#e6f4ea',
+      };
+      const colorTexto = {
+        error: '#c0392b',
+        info: '#31708f',
+        success: '#1e7e34',
+      };
+      contenedor.innerHTML = `<div style="padding:.75rem 1rem; border-radius:4px; background:${colores[tipo] || colores.info}; color:${colorTexto[tipo] || colorTexto.info};">${contenido}</div>`;
+    }
+
+    function establecerMensajeCampo(td, mensaje) {
+      const alerta = td.querySelector('.alerta');
+      if (!alerta) return;
+      if (mensaje) {
+        alerta.textContent = mensaje;
+        alerta.hidden = false;
+      } else {
+        alerta.textContent = '';
+        alerta.hidden = true;
+      }
+    }
+
+    function calcularRetencion(base, porcentaje, modo) {
+      const tasa = Number(porcentaje || 0);
+      if (modo === 'PORMIL') {
+        return base * (tasa / 1000);
+      }
+      return base * (tasa / 100);
+    }
+
+    function actualizarTotales(tr) {
+      const subtotal = Number(tr.dataset.subtotal || '0');
+      const iva = Number(tr.dataset.iva || '0');
+      const inc = Number(tr.dataset.inc || '0');
+
+      let retefuente = 0;
+      let reteica = 0;
+      let reteiva = 0;
+
+      ['RETEFUENTE', 'RETEICA', 'RETEIVA'].forEach((casilla) => {
+        const cellValor = tr.querySelector(`.valor-retencion[data-casilla="${casilla}"]`);
+        const cellPorcentaje = tr.querySelector(`.porcentaje[data-casilla="${casilla}"]`);
+        const select = tr.querySelector(`select[data-casilla="${casilla}"]`);
+        if (!cellValor || !cellPorcentaje || !select) return;
+        const opcion = select.selectedOptions[0];
+        if (!opcion || !opcion.value) {
+          cellPorcentaje.textContent = '0.0000';
+          cellValor.textContent = '0.00';
+          return;
+        }
+        const porcentaje = Number(opcion.dataset.porcentaje || '0');
+        const modo = opcion.dataset.modoCalculo || 'PORCENTAJE';
+        const valor = calcularRetencion(subtotal, porcentaje, modo);
+        cellPorcentaje.textContent = formatearNumero(porcentaje, 4);
+        cellValor.textContent = formatearNumero(valor, 2);
+        if (casilla === 'RETEFUENTE') retefuente = valor;
+        if (casilla === 'RETEICA') reteica = valor;
+        if (casilla === 'RETEIVA') reteiva = valor;
+      });
+
+      const totalNeto = subtotal + iva + inc - retefuente - reteica - reteiva;
+      const totalCell = tr.querySelector('.valor[data-campo="TOTAL_NETO"]');
+      if (totalCell) {
+        totalCell.textContent = formatearNumero(totalNeto, 2);
+      }
+      return { subtotal, iva, inc, retefuente, reteica, reteiva, totalNeto };
+    }
+
+    async function cargarCatalogos(proveedorId) {
+      if (!proveedorId) return null;
+      if (catalogCache.has(proveedorId)) {
+        return catalogCache.get(proveedorId);
+      }
+      try {
+        const respuesta = await fetch(`/liquidacion/${proveedorId}/catalogos/`, {
+          headers: { 'Accept': 'application/json' },
+        });
+        if (!respuesta.ok) {
+          return null;
+        }
+        const datos = await respuesta.json();
+        catalogCache.set(proveedorId, datos.catalogos || {});
+        return datos.catalogos || {};
+      } catch (error) {
+        console.error('Error al cargar catálogos', error);
+        return null;
+      }
+    }
+
+    function poblarSelect(select, opciones, casilla) {
+      const td = select.closest('td');
+      establecerMensajeCampo(td, '');
+      const valorAnterior = select.value;
+      select.innerHTML = '<option value="">Seleccione cuenta</option>';
+      if (!opciones || !opciones.length) {
+        select.disabled = true;
+        establecerMensajeCampo(td, 'No hay opciones disponibles para esta casilla; parametrice el proveedor.');
+        return;
+      }
+      select.disabled = false;
+      opciones.forEach((item) => {
+        const opcion = document.createElement('option');
+        opcion.value = item.id;
+        let texto = `${item.codigo} - ${item.descripcion}`;
+        if (RETENCIONES.has(casilla)) {
+          const sufijo = item.modo_calculo === 'PORMIL' ? '‰' : '%';
+          texto += ` (${(item.porcentaje || '0.0000')}${sufijo})`;
+        }
+        opcion.textContent = texto;
+        opcion.dataset.porcentaje = item.porcentaje || '0';
+        opcion.dataset.modoCalculo = item.modo_calculo || 'PORCENTAJE';
+        opcion.dataset.naturaleza = item.naturaleza || '';
+        select.appendChild(opcion);
+      });
+      if (opciones.length === 1) {
+        select.value = opciones[0].id;
+        establecerMensajeCampo(td, 'Seleccionado automáticamente por única opción.');
+      } else if (valorAnterior) {
+        select.value = valorAnterior;
+      }
+    }
+
+    async function inicializarFila(tr) {
+      const proveedorId = tr.dataset.proveedorId;
+      const selects = tr.querySelectorAll('select.cuenta-select');
+      if (!proveedorId) {
+        selects.forEach((select) => {
+          select.disabled = true;
+          establecerMensajeCampo(select.closest('td'), 'No hay proveedor asociado.');
+        });
+        actualizarTotales(tr);
+        return;
+      }
+      const catalogos = await cargarCatalogos(proveedorId);
+      selects.forEach((select) => {
+        const casilla = select.dataset.casilla;
+        const clave = CASILLA_KEYS[casilla];
+        const opciones = catalogos && catalogos[clave] ? catalogos[clave] : [];
+        poblarSelect(select, opciones, casilla);
+      });
+      actualizarTotales(tr);
+    }
+
+    document.querySelectorAll('#tbody-liq tr').forEach((tr) => {
+      inicializarFila(tr);
+    });
+
+    document.addEventListener('change', (evento) => {
+      if (evento.target.matches('#tbody-liq select.cuenta-select')) {
+        const tr = evento.target.closest('tr');
+        actualizarTotales(tr);
+      }
+    });
+
+    function recolectarFilas() {
+      const filas = [];
+      document.querySelectorAll('#tbody-liq tr').forEach((tr) => {
+        const totales = actualizarTotales(tr);
+        const fila = {
+          factura_id: tr.dataset.facturaId || null,
+          proveedor_id: tr.dataset.proveedorId ? Number(tr.dataset.proveedorId) : null,
+          tipo_documento: tr.dataset.tipoDocumento || '',
+          cufe: tr.dataset.cufe || '',
+          nit: tr.dataset.nit || '',
+          proveedor: tr.dataset.proveedor || '',
+          fecha: tr.dataset.fecha || '',
+          descripcion: tr.dataset.descripcion || '',
+          prefijo_folio: tr.dataset.prefijoFolio || '',
+          importes: {},
+          cuentas: {},
+          porcentajes: {},
+        };
+        ['SUBTOTAL', 'IVA', 'INC', 'TOTAL_NETO'].forEach((casilla) => {
+          const campo = {
+            SUBTOTAL: 'subtotal',
+            IVA: 'iva',
+            INC: 'inc',
+            TOTAL_NETO: 'total_neto',
+          }[casilla];
+          const valor = casilla === 'TOTAL_NETO' ? totales.totalNeto : Number(tr.dataset[campo.replace('_', '')] || totales[campo]);
+          fila.importes[campo] = formatearNumero(valor, 2);
+          const select = tr.querySelector(`select[data-casilla="${casilla}"]`);
+          fila.cuentas[campo] = select && select.value ? Number(select.value) : null;
+        });
+        ['RETEFUENTE', 'RETEICA', 'RETEIVA'].forEach((casilla) => {
+          const campo = CASILLA_FIELD_MAP[casilla];
+          const select = tr.querySelector(`select[data-casilla="${casilla}"]`);
+          const porcentajeEl = tr.querySelector(`.porcentaje[data-casilla="${casilla}"]`);
+          const valorEl = tr.querySelector(`.valor-retencion[data-casilla="${casilla}"]`);
+          fila.importes[campo] = valorEl ? valorEl.textContent : '0.00';
+          fila.porcentajes[campo] = porcentajeEl ? porcentajeEl.textContent : '0.0000';
+          fila.cuentas[campo] = select && select.value ? Number(select.value) : null;
+        });
+        filas.push(fila);
+      });
+      return filas;
+    }
+
+    async function validarFilas() {
+      mostrarMensaje('Validando…', 'info');
+      const filas = recolectarFilas();
+      try {
+        const respuesta = await fetch('{% url "liquidacion_validar" %}', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': CSRF_TOKEN,
+          },
+          body: JSON.stringify({ filas }),
+        });
+        const datos = await respuesta.json();
+        if (respuesta.ok) {
+          mostrarMensaje('La validación se completó correctamente.', 'success');
+          return { filas: datos.filas || filas, valido: true };
+        }
+        const errores = datos.errores || [];
+        if (!errores.length) {
+          mostrarMensaje('La validación no se pudo completar.', 'error');
+          return { filas, valido: false };
+        }
+        const mensajes = errores.map((err) => `Fila ${err.fila + 1 || ''}: ${err.mensaje}`).join('<br>');
+        mostrarMensaje(mensajes, 'error');
+        return { filas, valido: false };
+      } catch (error) {
+        console.error('Error de validación', error);
+        mostrarMensaje('No fue posible validar la información.', 'error');
+        return { filas, valido: false };
+      }
+    }
+
+    document.getElementById('btn-validar')?.addEventListener('click', () => {
+      validarFilas();
+    });
+
+    document.getElementById('btn-exportar')?.addEventListener('click', async () => {
+      const resultado = await validarFilas();
+      if (!resultado || !resultado.valido) {
+        return;
+      }
+      const payload = encodeURIComponent(JSON.stringify({ filas: resultado.filas }));
+      window.location.href = `{% url "liquidacion_exportar" %}?formato=csv&payload=${payload}`;
+    });
   </script>
 </body>
 </html>

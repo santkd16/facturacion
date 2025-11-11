@@ -1,13 +1,12 @@
 from django.contrib import admin
 from .models import (
     CuentaContable,
+    CuentaContableProveedor,
     Empresa,
     FacturaXML,
     FacturaXLS,
     PermisoEmpresa,
     Proveedor,
-    Retencion,
-    TarifaICA,
 )
 
 
@@ -69,13 +68,29 @@ class CuentaContableAdmin(admin.ModelAdmin):
     search_fields = ("codigo", "descripcion")
 
 
-# Nuevos registros
-@admin.register(Retencion)
-class RetencionAdmin(admin.ModelAdmin):
-    list_display = ("proveedor", "porcentaje", "cuenta_contable")
-    list_filter = ("proveedor", "proveedor__empresa")
-
-
-@admin.register(TarifaICA)
-class TarifaICAAdmin(admin.ModelAdmin):
-    list_display = ("valor", "descripcion")
+@admin.register(CuentaContableProveedor)
+class CuentaContableProveedorAdmin(admin.ModelAdmin):
+    list_display = (
+        "proveedor",
+        "casilla",
+        "cuenta",
+        "naturaleza",
+        "porcentaje",
+        "modo_calculo",
+        "activo",
+    )
+    list_filter = (
+        "proveedor__empresa",
+        "proveedor",
+        "casilla",
+        "naturaleza",
+        "modo_calculo",
+        "activo",
+    )
+    search_fields = (
+        "proveedor__nombre",
+        "proveedor__nit",
+        "cuenta__codigo",
+        "cuenta__descripcion",
+    )
+    autocomplete_fields = ("proveedor", "cuenta")

@@ -101,27 +101,60 @@ class CuentaContable(models.Model):
         return f"{self.codigo} - {self.descripcion}"
 
 
-# --- NUEVO: modelos de Retenciones e ICA ---
-class Retencion(models.Model):
+class CuentaContableProveedor(models.Model):
+    class Casilla(models.TextChoices):
+        SUBTOTAL = "SUBTOTAL", "Sub total"
+        IVA = "IVA", "IVA"
+        INC = "INC", "INC"
+        RETEFUENTE = "RETEFUENTE", "ReteFuente"
+        RETEICA = "RETEICA", "ReteICA"
+        RETEIVA = "RETEIVA", "ReteIva"
+        TOTAL_NETO = "TOTAL_NETO", "Total neto"
+
+    class ModoCalculo(models.TextChoices):
+        PORCENTAJE = "PORCENTAJE", "Porcentaje"
+        PORMIL = "PORMIL", "Por mil"
+
     proveedor = models.ForeignKey(
-        Proveedor, on_delete=models.CASCADE, related_name="retenciones"
+        Proveedor, on_delete=models.CASCADE, related_name="catalogo_cuentas"
     )
-    porcentaje = models.DecimalField(max_digits=5, decimal_places=2)  # ej: 2.50 = 2.5 %
-    cuenta_contable = models.ForeignKey(CuentaContable, on_delete=models.PROTECT)
+    cuenta = models.ForeignKey(
+        CuentaContable, on_delete=models.PROTECT, related_name="parametrizaciones"
+    )
+    casilla = models.CharField(max_length=20, choices=Casilla.choices)
+    naturaleza = models.CharField(
+        max_length=1,
+        choices=(
+            ("D", "Débito"),
+            ("C", "Crédito"),
+        ),
+    )
+    porcentaje = models.DecimalField(
+        max_digits=9, decimal_places=4, null=True, blank=True
+    )
+    modo_calculo = models.CharField(
+        max_length=10,
+        choices=ModoCalculo.choices,
+        blank=True,
+    )
+    ayuda = models.CharField(max_length=255, blank=True, default="")
+    activo = models.BooleanField(default=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ("proveedor", "porcentaje")
+        unique_together = ("proveedor", "casilla", "cuenta")
+        verbose_name = "Parametrización de cuenta"
+        verbose_name_plural = "Parametrizaciones de cuentas"
 
     def __str__(self) -> str:
-        return f"RF {self.porcentaje}% - {self.proveedor.nombre}"
+        return (
+            f"{self.proveedor.nombre} - {self.get_casilla_display()} - "
+            f"{self.cuenta.codigo} ({self.get_naturaleza_display()})"
+        )
 
-
-class TarifaICA(models.Model):
-    valor = models.DecimalField(max_digits=5, decimal_places=2)  # ej: 8.66
-    descripcion = models.CharField(max_length=100, blank=True, default="")
-
-    class Meta:
-        unique_together = ("valor", "descripcion")
-
-    def __str__(self) -> str:
-        return f"ICA {self.valor}% {self.descripcion}".strip()
+    @property
+    def porcentaje_display(self) -> str:
+        if self.porcentaje is None:
+            return ""
+        return f"{self.porcentaje.normalize()}"

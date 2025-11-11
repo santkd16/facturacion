@@ -10,8 +10,18 @@ urlpatterns = [
         name="seleccionar_empresa",
     ),
     path(
-        "descargar-liquidacion/",
-        views.descargar_liquidacion_csv,
-        name="descargar_liquidacion",
+        "liquidacion/<int:proveedor_id>/catalogos/",
+        views.liquidacion_catalogos,
+        name="liquidacion_catalogos",
+    ),
+    path(
+        "liquidacion/validar/",
+        views.liquidacion_validar,
+        name="liquidacion_validar",
+    ),
+    path(
+        "liquidacion/exportar/",
+        views.liquidacion_exportar,
+        name="liquidacion_exportar",
     ),
 ]

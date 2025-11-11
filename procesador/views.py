@@ -4,7 +4,7 @@ import os
 import tempfile
 import zipfile
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import xml.etree.ElementTree as ET
 import pandas as pd
 from django.contrib import messages
@@ -12,19 +12,37 @@ from django.contrib.auth import logout
 from django.contrib.auth.decorators import login_required
 from django.db import connection
 from django.db.utils import DatabaseError, ProgrammingError
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.dateparse import parse_date
+from django.views.decorators.http import require_GET, require_POST
+
+NATURALEZA_ERROR_MSG = "La naturaleza de la cuenta seleccionada no coincide con la casilla esperada."
+CUENTA_PROVEEDOR_MSG = "La cuenta seleccionada no pertenece al proveedor de la factura."
+CASILLA_ERROR_MSG = "La cuenta seleccionada no corresponde a la casilla esperada."
+CAMPO_OBLIGATORIO_MSG = "El campo ‘Cuenta contable’ es obligatorio porque el importe es distinto de cero."
+
 
 from .forms import UploadExcelForm, UploadZipForm
 from .models import (
+    CuentaContableProveedor,
     Empresa,
     FacturaXML,
     FacturaXLS,
     PermisoEmpresa,
     Proveedor,
-    Retencion,
-    TarifaICA,
+)
+from .liquidacion import (
+    CASILLAS,
+    CASILLA_FIELD_MAP,
+    CASILLA_HELP_TEXT,
+    CASILLA_RULES,
+    CATALOGO_RESPONSE_KEYS,
+    RETENCIONES,
+    agrupar_catalogos_por_proveedor,
+    calcular_retencion,
+    signo_por_naturaleza,
+    validar_prefijo_para_casilla,
 )
 
 # Namespaces for XML UBL
@@ -58,6 +76,13 @@ def _parse_decimal(value, default: Decimal = Decimal("0")) -> Decimal:
         return Decimal(cleaned)
     except (InvalidOperation, TypeError):
         return default
+
+
+def _decimal_to_str(value: Decimal, places: int = 2) -> str:
+    if not isinstance(value, Decimal):
+        value = _parse_decimal(value)
+    quantum = Decimal(1).scaleb(-places)
+    return f"{value.quantize(quantum, rounding=ROUND_HALF_UP)}"
 
 
 def _coerce_fecha(value) -> date | None:
@@ -330,82 +355,64 @@ def dashboard(request):
     )
     facturas_xml_map = {fx.cufe: fx for fx in facturas_xml}
     facturas_xls = FacturaXLS.objects.filter(empresa=empresa)
+    proveedores_empresa = {
+        p.nit: p for p in Proveedor.objects.filter(empresa=empresa)
+    }
 
-    # --- NUEVO: datos para la pestaña Liquidación ---
-    # Obtener tarifas ICA; si no existen, usar valores por defecto.
-    tarifas_ica = sorted(
-        TarifaICA.objects.all().values_list("valor", flat=True)
-    )
-    if not tarifas_ica:
-        tarifas_ica = [
-            Decimal("0.414"),
-            Decimal("0.866"),
-            Decimal("0.966"),
-            Decimal("1.38"),
-        ]
-    if Decimal("0") not in tarifas_ica:
-        tarifas_ica.insert(0, Decimal("0"))
-
-    liquidaciones = []
-    for f in facturas_xls:
+    liquidacion_filas = []
+    for factura in facturas_xls:
         subtotal = (
-            _parse_decimal(f.total)
-            - _parse_decimal(f.iva)
-            - _parse_decimal(f.inc)
+            _parse_decimal(factura.total)
+            - _parse_decimal(factura.iva)
+            - _parse_decimal(factura.inc)
         )
-        factura_xml = facturas_xml_map.get(f.cufe)
+        iva = _parse_decimal(factura.iva)
+        inc = _parse_decimal(factura.inc)
+        factura_xml = facturas_xml_map.get(factura.cufe)
         proveedor = factura_xml.proveedor if factura_xml else None
-        nit = f.nit_emisor or (proveedor.nit if proveedor else "")
-        proveedor_nombre = (
-            f.nombre_emisor or (proveedor.nombre if proveedor else "")
+        if proveedor is None and factura.nit_emisor:
+            proveedor = proveedores_empresa.get(factura.nit_emisor)
+        nit = factura.nit_emisor or (proveedor.nit if proveedor else "")
+        proveedor_nombre = factura.nombre_emisor or (
+            proveedor.nombre if proveedor else ""
         )
-        fecha_excel = f.fecha_documento
-        fecha_xml = factura_xml.fecha if factura_xml else None
-        coincide_xml = factura_xml is not None
-        fecha_excel_str = fecha_excel.strftime("%Y-%m-%d") if fecha_excel else ""
-        fecha = fecha_excel_str
+        fecha_excel = factura.fecha_documento
+        fecha_excel_str = fecha_excel.isoformat() if fecha_excel else ""
         descripcion = factura_xml.descripcion if factura_xml else ""
-        descripcion_display = descripcion if coincide_xml else "Sin coincidencia XML"
-        if f.prefijo and f.folio:
-            prefijo_folio = f"{f.prefijo}-{f.folio}"
-        else:
-            prefijo_folio = f.prefijo or f.folio or ""
-
-        # Opciones de retefuente por proveedor; si no hay, usar valores base.
-        retenciones = (
-            Retencion.objects.filter(proveedor=proveedor).order_by("porcentaje")
-            if proveedor
-            else Retencion.objects.none()
+        descripcion_display = (
+            descripcion if factura_xml else "Sin coincidencia XML"
         )
-        opciones_rf = [r.porcentaje for r in retenciones] or [
-            Decimal("0"),
-            Decimal("2.5"),
-            Decimal("4"),
-            Decimal("3.5"),
-            Decimal("11"),
-            Decimal("1"),
-        ]
-        rf_por_defecto = opciones_rf[0] if opciones_rf else Decimal("0")
-        ica_por_defecto = tarifas_ica[0] if tarifas_ica else Decimal("0")
+        if factura.prefijo and factura.folio:
+            prefijo_folio = f"{factura.prefijo}-{factura.folio}"
+        else:
+            prefijo_folio = factura.prefijo or factura.folio or ""
 
-        liquidaciones.append(
+        total_neto_base = subtotal + iva + inc
+
+        liquidacion_filas.append(
             {
-                "factura": f,
-                "subtotal": subtotal,
-                "opciones_rf": opciones_rf,
-                "opciones_ica": tarifas_ica,
-                "retefuente_default": rf_por_defecto,
-                "reteica_default": ica_por_defecto,
+                "factura_id": factura.id,
+                "tipo_documento": factura.tipo_documento,
+                "cufe": factura.cufe,
                 "nit": nit,
                 "proveedor_nombre": proveedor_nombre,
-                "fecha_excel": fecha_excel,
-                "fecha_xml": fecha_xml,
-                "fecha_excel_str": fecha_excel_str,
-                "fecha": fecha,
-                "prefijo_folio": prefijo_folio,
+                "proveedor_id": proveedor.id if proveedor else None,
+                "fecha": fecha_excel_str,
                 "descripcion": descripcion,
                 "descripcion_display": descripcion_display,
-                "coincide_xml": coincide_xml,
+                "prefijo_folio": prefijo_folio,
+                "subtotal": _decimal_to_str(subtotal),
+                "subtotal_raw": str(subtotal),
+                "iva": _decimal_to_str(iva),
+                "iva_raw": str(iva),
+                "inc": _decimal_to_str(inc),
+                "inc_raw": str(inc),
+                "retefuente": "0.00",
+                "reteica": "0.00",
+                "reteiva": "0.00",
+                "total_neto": _decimal_to_str(total_neto_base),
+                "total_neto_raw": str(total_neto_base),
+                "coincide_xml": factura_xml is not None,
             }
         )
 
@@ -418,138 +425,472 @@ def dashboard(request):
             "form_zip": form_zip,
             "facturas_xml": facturas_xml,
             "facturas_xls": facturas_xls,
-            "liquidaciones": liquidaciones,
+            "liquidacion_filas": liquidacion_filas,
+            "liquidacion_casilla_help": CASILLA_HELP_TEXT,
         },
     )
 
 
+def _validar_filas_liquidacion(
+    filas: list[dict],
+    empresa: Empresa,
+):
+    if not isinstance(filas, list):
+        return (
+            [
+                {
+                    "fila": None,
+                    "factura_id": None,
+                    "campo": None,
+                    "mensaje": "Formato inválido.",
+                }
+            ],
+            [],
+        )
+
+    proveedor_ids = {
+        fila.get("proveedor_id")
+        for fila in filas
+        if fila.get("proveedor_id")
+    }
+
+    _proveedores, catalogos_por_clave, catalogos_por_id = agrupar_catalogos_por_proveedor(
+        proveedor_ids,
+        empresa_id=empresa.id,
+    )
+
+    errores: list[dict] = []
+    filas_resultado: list[dict] = []
+
+    for indice, fila in enumerate(filas):
+        importes = fila.get("importes") or {}
+        cuentas = fila.get("cuentas") or {}
+        porcentajes = fila.get("porcentajes") or {}
+        proveedor_id = fila.get("proveedor_id")
+
+        subtotal = _parse_decimal(importes.get("subtotal"))
+        iva = _parse_decimal(importes.get("iva"))
+        inc = _parse_decimal(importes.get("inc"))
+
+        retefuente_val = Decimal("0")
+        reteica_val = Decimal("0")
+        reteiva_val = Decimal("0")
+
+        casillas_resultado: dict[str, dict] = {}
+
+        for casilla in CASILLAS:
+            campo = CASILLA_FIELD_MAP[casilla]
+            monto = _parse_decimal(importes.get(campo))
+            monto_original = monto
+            cuenta_id = cuentas.get(campo)
+            porcentaje_input = (
+                _parse_decimal(porcentajes.get(campo))
+                if casilla in RETENCIONES
+                else None
+            )
+
+            opciones = catalogos_por_clave.get((proveedor_id, casilla), [])
+            catalogo = None
+            catalogo_valido = True
+
+            if monto != Decimal("0"):
+                if not opciones:
+                    errores.append(
+                        {
+                            "fila": indice,
+                            "factura_id": fila.get("factura_id"),
+                            "campo": campo,
+                            "mensaje": CASILLA_RULES[casilla][
+                                "mensaje_sin_opciones"
+                            ],
+                        }
+                    )
+                elif cuenta_id in (None, ""):
+                    errores.append(
+                        {
+                            "fila": indice,
+                            "factura_id": fila.get("factura_id"),
+                            "campo": campo,
+                            "mensaje": CAMPO_OBLIGATORIO_MSG,
+                        }
+                    )
+
+            if cuenta_id not in (None, ""):
+                try:
+                    catalogo = catalogos_por_id.get(int(cuenta_id))
+                except (TypeError, ValueError):
+                    catalogo = None
+                if catalogo is None:
+                    errores.append(
+                        {
+                            "fila": indice,
+                            "factura_id": fila.get("factura_id"),
+                            "campo": campo,
+                            "mensaje": CUENTA_PROVEEDOR_MSG,
+                        }
+                    )
+                    catalogo_valido = False
+                elif proveedor_id is None or catalogo.proveedor_id != proveedor_id:
+                    errores.append(
+                        {
+                            "fila": indice,
+                            "factura_id": fila.get("factura_id"),
+                            "campo": campo,
+                            "mensaje": CUENTA_PROVEEDOR_MSG,
+                        }
+                    )
+                    catalogo_valido = False
+                elif catalogo.casilla != casilla:
+                    errores.append(
+                        {
+                            "fila": indice,
+                            "factura_id": fila.get("factura_id"),
+                            "campo": campo,
+                            "mensaje": CASILLA_ERROR_MSG,
+                        }
+                    )
+                    catalogo_valido = False
+                else:
+                    mensaje_prefijo = validar_prefijo_para_casilla(
+                        casilla, catalogo.cuenta.codigo
+                    )
+                    if mensaje_prefijo:
+                        errores.append(
+                            {
+                                "fila": indice,
+                                "factura_id": fila.get("factura_id"),
+                                "campo": campo,
+                                "mensaje": mensaje_prefijo,
+                            }
+                        )
+                        catalogo_valido = False
+                if (
+                    catalogo_valido
+                    and catalogo is not None
+                    and catalogo.naturaleza
+                    != CASILLA_RULES[casilla]["naturaleza"]
+                ):
+                    errores.append(
+                        {
+                            "fila": indice,
+                            "factura_id": fila.get("factura_id"),
+                            "campo": campo,
+                            "mensaje": NATURALEZA_ERROR_MSG,
+                        }
+                    )
+                    catalogo_valido = False
+
+            casilla_info = {
+                "monto": monto,
+                "catalogo": catalogo if catalogo_valido else None,
+                "porcentaje": None,
+                "valor": None,
+                "naturaleza": (
+                    catalogo.naturaleza
+                    if catalogo_valido and catalogo is not None
+                    else CASILLA_RULES[casilla]["naturaleza"]
+                ),
+            }
+
+            if (
+                casilla in RETENCIONES
+                and catalogo_valido
+                and catalogo is not None
+            ):
+                if catalogo.porcentaje is None:
+                    errores.append(
+                        {
+                            "fila": indice,
+                            "factura_id": fila.get("factura_id"),
+                            "campo": campo,
+                            "mensaje": CASILLA_RULES[casilla][
+                                "mensaje_sin_opciones"
+                            ],
+                        }
+                    )
+                else:
+                    porcentaje_calc, valor_calc = calcular_retencion(
+                        subtotal, catalogo
+                    )
+                    casilla_info["porcentaje"] = porcentaje_calc
+                    casilla_info["valor"] = valor_calc
+                    casilla_info["monto"] = valor_calc
+                    if casilla == "RETEFUENTE":
+                        retefuente_val = valor_calc
+                    elif casilla == "RETEICA":
+                        reteica_val = valor_calc
+                    elif casilla == "RETEIVA":
+                        reteiva_val = valor_calc
+            elif casilla in RETENCIONES:
+                casilla_info["porcentaje"] = (
+                    porcentaje_input if porcentaje_input is not None else Decimal("0")
+                )
+                casilla_info["valor"] = monto
+                if casilla == "RETEFUENTE":
+                    retefuente_val = monto
+                elif casilla == "RETEICA":
+                    reteica_val = monto
+                elif casilla == "RETEIVA":
+                    reteiva_val = monto
+            else:
+                casilla_info["valor"] = monto
+
+            if casilla == "TOTAL_NETO":
+                total_calculado = subtotal + iva + inc - retefuente_val - reteica_val - reteiva_val
+                casilla_info["valor"] = total_calculado
+                casilla_info["monto"] = total_calculado
+                if total_calculado != Decimal("0") and cuenta_id in (None, ""):
+                    errores.append(
+                        {
+                            "fila": indice,
+                            "factura_id": fila.get("factura_id"),
+                            "campo": campo,
+                            "mensaje": CAMPO_OBLIGATORIO_MSG,
+                        }
+                    )
+
+            casillas_resultado[casilla] = casilla_info
+
+        filas_resultado.append(
+            {
+                "indice": indice,
+                "factura_id": fila.get("factura_id"),
+                "proveedor_id": proveedor_id,
+                "original": fila,
+                "casillas": casillas_resultado,
+                "subtotal": subtotal,
+                "iva": iva,
+                "inc": inc,
+                "retefuente": retefuente_val,
+                "reteica": reteica_val,
+                "reteiva": reteiva_val,
+                "total_neto": subtotal + iva + inc - retefuente_val - reteica_val - reteiva_val,
+            }
+        )
+
+    return errores, filas_resultado
+
+
+def _serializar_fila_validada(fila: dict) -> dict:
+    datos = {
+        "indice": fila["indice"],
+        "factura_id": fila["factura_id"],
+        "proveedor_id": fila["proveedor_id"],
+        "importes": {},
+        "cuentas": {},
+        "porcentajes": {},
+    }
+
+    for casilla, info in fila["casillas"].items():
+        campo = CASILLA_FIELD_MAP[casilla]
+        datos["importes"][campo] = _decimal_to_str(info["valor"] or info["monto"])
+        datos["cuentas"][campo] = (
+            info["catalogo"].id if info["catalogo"] is not None else None
+        )
+        if casilla in RETENCIONES:
+            porcentaje = info.get("porcentaje") or Decimal("0")
+            datos["porcentajes"][campo] = _decimal_to_str(porcentaje, places=4)
+
+    datos["total_neto_calculado"] = _decimal_to_str(fila["total_neto"])
+    return datos
+
+
 @login_required
-def descargar_liquidacion_csv(request):
-    """Exporta un CSV con la liquidación global.
+@require_GET
+def liquidacion_catalogos(request, proveedor_id: int):
+    empresa = _obtener_empresa_actual(request)
+    if empresa is None:
+        return JsonResponse(
+            {"detail": "Selecciona una empresa para continuar."}, status=400
+        )
 
-    Si la petición es POST se espera un payload JSON con la información
-    mostrada en la tabla del dashboard, incluyendo las retenciones
-    seleccionadas por el usuario. En caso contrario, se genera un CSV con
-    los valores por defecto sin aplicar retenciones.
-    """
+    try:
+        proveedor = Proveedor.objects.get(pk=proveedor_id, empresa=empresa)
+    except Proveedor.DoesNotExist:
+        return JsonResponse({"detail": "Proveedor no encontrado."}, status=404)
 
+    catalogos = (
+        CuentaContableProveedor.objects.filter(proveedor=proveedor, activo=True)
+        .select_related("cuenta")
+        .order_by("casilla", "cuenta__codigo")
+    )
+
+    respuesta = {clave: [] for clave in CATALOGO_RESPONSE_KEYS.values()}
+    for item in catalogos:
+        entry = {
+            "id": item.id,
+            "codigo": item.cuenta.codigo,
+            "descripcion": item.cuenta.descripcion,
+            "naturaleza": item.naturaleza,
+        }
+        if item.porcentaje is not None:
+            entry["porcentaje"] = _decimal_to_str(item.porcentaje, places=4)
+        if item.modo_calculo:
+            entry["modo_calculo"] = item.modo_calculo
+        if item.ayuda:
+            entry["ayuda"] = item.ayuda
+        respuesta[CATALOGO_RESPONSE_KEYS[item.casilla]].append(entry)
+
+    return JsonResponse(
+        {
+            "proveedor": {
+                "id": proveedor.id,
+                "nombre": proveedor.nombre,
+                "nit": proveedor.nit,
+            },
+            "catalogos": respuesta,
+        }
+    )
+
+
+@login_required
+@require_POST
+def liquidacion_validar(request):
+    empresa = _obtener_empresa_actual(request)
+    if empresa is None:
+        return JsonResponse(
+            {"detail": "Selecciona una empresa para continuar."}, status=400
+        )
+
+    try:
+        payload = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "JSON inválido."}, status=400)
+
+    filas = payload.get("filas", [])
+    errores, filas_resultado = _validar_filas_liquidacion(filas, empresa)
+
+    return JsonResponse(
+        {
+            "valido": not errores,
+            "errores": errores,
+            "filas": [_serializar_fila_validada(fila) for fila in filas_resultado],
+        },
+        status=200 if not errores else 400,
+    )
+
+
+@login_required
+@require_GET
+def liquidacion_exportar(request):
     ensure_fecha_documento_column()
     empresa = _obtener_empresa_actual(request)
     if empresa is None:
         messages.info(request, "Selecciona una empresa para continuar.")
         return redirect("seleccionar_empresa")
 
+    formato = request.GET.get("formato")
+    if formato != "csv":
+        return JsonResponse({"detail": "Formato no soportado."}, status=400)
+
+    payload = request.GET.get("payload", "{}")
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "JSON inválido."}, status=400)
+
+    filas = data.get("filas", [])
+    errores, filas_resultado = _validar_filas_liquidacion(filas, empresa)
+    if errores:
+        return JsonResponse({"errores": errores}, status=400)
+
     import csv
     import io
 
-    rows: list[dict[str, str]] = []
-
-    if request.method == "POST":
-        payload = request.POST.get("rows_json", "[]")
-        try:
-            data = json.loads(payload)
-        except json.JSONDecodeError:
-            data = []
-
-        for entry in data:
-            subtotal = _parse_decimal(entry.get("subtotal"))
-            iva = _parse_decimal(entry.get("iva"))
-            inc = _parse_decimal(entry.get("inc"))
-            rf_pct = _parse_decimal(entry.get("retefuente_pct"))
-            ica_pct = _parse_decimal(entry.get("reteica_pct"))
-            retefuente = (subtotal * rf_pct) / Decimal("100")
-            reteica = (subtotal * ica_pct) / Decimal("100")
-            total_neto = subtotal + iva + inc - retefuente - reteica
-            rows.append(
-                {
-                    "Tipo de documento": entry.get("tipo_documento", ""),
-                    "CUFE/CUDE": entry.get("cufe", ""),
-                    "NIT": entry.get("nit", ""),
-                    "Proveedor": entry.get("proveedor", ""),
-                    "Fecha": entry.get("fecha", ""),
-                    "Descripción": entry.get("descripcion", ""),
-                    "Prefijo+Folio": entry.get("prefijo_folio", ""),
-                    "Sub total": f"{subtotal:.2f}",
-                    "IVA": f"{iva:.2f}",
-                    "INC": f"{inc:.2f}",
-                    "ReteFuente": f"{retefuente:.2f}",
-                    "ReteICA": f"{reteica:.2f}",
-                    "Total neto": f"{total_neto:.2f}",
-                }
-            )
-    else:
-        facturas_xml = {
-            fx.cufe: fx
-            for fx in FacturaXML.objects.filter(empresa=empresa).select_related("proveedor")
-        }
-
-        for factura in FacturaXLS.objects.filter(empresa=empresa):
-            subtotal = (
-                _parse_decimal(factura.total)
-                - _parse_decimal(factura.iva)
-                - _parse_decimal(factura.inc)
-            )
-            factura_xml = facturas_xml.get(factura.cufe)
-            nit = factura.nit_emisor or (
-                factura_xml.proveedor.nit if factura_xml else ""
-            )
-            proveedor = factura.nombre_emisor or (
-                factura_xml.proveedor.nombre if factura_xml else ""
-            )
-            fecha = (
-                factura.fecha_documento.isoformat()
-                if factura.fecha_documento
-                else ""
-            )
-            descripcion = factura_xml.descripcion if factura_xml else ""
-            if factura.prefijo and factura.folio:
-                prefijo_folio = f"{factura.prefijo}-{factura.folio}"
-            else:
-                prefijo_folio = factura.prefijo or factura.folio or ""
-
-            total_neto = subtotal + _parse_decimal(factura.iva) + _parse_decimal(
-                factura.inc
-            )
-            rows.append(
-                {
-                    "Tipo de documento": factura.tipo_documento,
-                    "CUFE/CUDE": factura.cufe,
-                    "NIT": nit,
-                    "Proveedor": proveedor,
-                    "Fecha": fecha,
-                    "Descripción": descripcion,
-                    "Prefijo+Folio": prefijo_folio,
-                    "Sub total": f"{subtotal:.2f}",
-                    "IVA": f"{_parse_decimal(factura.iva):.2f}",
-                    "INC": f"{_parse_decimal(factura.inc):.2f}",
-                    "ReteFuente": "0.00",
-                    "ReteICA": "0.00",
-                    "Total neto": f"{total_neto:.2f}",
-                }
-            )
-
     buffer = io.StringIO()
     fieldnames = [
-        "Tipo de documento",
+        "Tipo documento",
         "CUFE/CUDE",
         "NIT",
         "Proveedor",
         "Fecha",
         "Descripción",
-        "Prefijo+Folio",
+        "Prefijo + Folio",
         "Sub total",
+        "Sub total – Cuenta contable",
         "IVA",
+        "IVA – Cuenta contable",
         "INC",
-        "ReteFuente",
-        "ReteICA",
+        "INC – Cuenta contable",
+        "ReteFuente (%)",
+        "ReteFuente (valor)",
+        "ReteFuente – Cuenta contable",
+        "ReteICA (%)",
+        "ReteICA (valor)",
+        "ReteICA – Cuenta contable",
+        "ReteIva (%)",
+        "ReteIva (valor)",
+        "ReteIva – Cuenta contable",
         "Total neto",
+        "Total neto – Cuenta contable",
     ]
     writer = csv.DictWriter(buffer, fieldnames=fieldnames)
     writer.writeheader()
-    if rows:
-        writer.writerows(rows)
-    else:
-        writer.writerow({"Tipo de documento": "Sin datos"})
+
+    for fila in filas_resultado:
+        original = fila.get("original", {})
+        casillas = fila.get("casillas", {})
+
+        def obtener_cuenta(casilla: str) -> str:
+            info = casillas.get(casilla, {})
+            catalogo = info.get("catalogo")
+            return catalogo.cuenta.codigo if catalogo else ""
+
+        def obtener_monto(casilla: str) -> Decimal:
+            info = casillas.get(casilla, {})
+            valor = info.get("valor")
+            if valor is None:
+                valor = info.get("monto", Decimal("0"))
+            naturaleza = info.get("naturaleza", CASILLA_RULES[casilla]["naturaleza"])
+            signo = signo_por_naturaleza(naturaleza)
+            return (valor or Decimal("0")) * signo
+
+        def obtener_porcentaje(casilla: str) -> str:
+            info = casillas.get(casilla, {})
+            porcentaje = info.get("porcentaje")
+            if porcentaje is None:
+                porcentaje = Decimal("0")
+            return _decimal_to_str(porcentaje, places=4)
+
+        subtotal_val = casillas.get("SUBTOTAL", {}).get("valor", fila["subtotal"])
+        iva_val = casillas.get("IVA", {}).get("valor", fila["iva"])
+        inc_val = casillas.get("INC", {}).get("valor", fila["inc"])
+        total_neto_val = fila["total_neto"]
+
+        writer.writerow(
+            {
+                "Tipo documento": original.get("tipo_documento", ""),
+                "CUFE/CUDE": original.get("cufe", ""),
+                "NIT": original.get("nit", ""),
+                "Proveedor": original.get("proveedor", ""),
+                "Fecha": original.get("fecha", ""),
+                "Descripción": original.get("descripcion", ""),
+                "Prefijo + Folio": original.get("prefijo_folio", ""),
+                "Sub total": _decimal_to_str(subtotal_val),
+                "Sub total – Cuenta contable": obtener_cuenta("SUBTOTAL"),
+                "IVA": _decimal_to_str(iva_val),
+                "IVA – Cuenta contable": obtener_cuenta("IVA"),
+                "INC": _decimal_to_str(inc_val),
+                "INC – Cuenta contable": obtener_cuenta("INC"),
+                "ReteFuente (%)": obtener_porcentaje("RETEFUENTE"),
+                "ReteFuente (valor)": _decimal_to_str(
+                    obtener_monto("RETEFUENTE")
+                ),
+                "ReteFuente – Cuenta contable": obtener_cuenta("RETEFUENTE"),
+                "ReteICA (%)": obtener_porcentaje("RETEICA"),
+                "ReteICA (valor)": _decimal_to_str(
+                    obtener_monto("RETEICA")
+                ),
+                "ReteICA – Cuenta contable": obtener_cuenta("RETEICA"),
+                "ReteIva (%)": obtener_porcentaje("RETEIVA"),
+                "ReteIva (valor)": _decimal_to_str(
+                    obtener_monto("RETEIVA")
+                ),
+                "ReteIva – Cuenta contable": obtener_cuenta("RETEIVA"),
+                "Total neto": _decimal_to_str(total_neto_val),
+                "Total neto – Cuenta contable": obtener_cuenta("TOTAL_NETO"),
+            }
+        )
 
     response = HttpResponse(
         buffer.getvalue(), content_type="text/csv; charset=utf-8"
