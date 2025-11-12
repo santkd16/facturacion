@@ -604,6 +604,23 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
         self.assertIsNone(resultado["cuentas"].get("iva"))
         self.assertTrue(resultado["listo"])
 
+    def test_validacion_total_neto_sin_parametrizacion_devuelve_na(self):
+        self.parametros["TOTAL_NETO"].delete()
+        fila = self.build_fila_payload()
+        fila["cuentas"]["total_neto"] = None
+        response = self.client.post(
+            reverse("liquidacion_validar"),
+            data=json.dumps({"filas": [fila]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["valido"])
+        self.assertEqual(len(data["errores"]), 0)
+        resultado = data["filas"][0]
+        self.assertIsNone(resultado["cuentas"].get("total_neto"))
+        self.assertTrue(resultado["listo"])
+
 
 class LiquidacionExportarTests(LiquidacionTestBase):
     def test_exporta_csv_con_cuentas(self):
@@ -658,6 +675,20 @@ class LiquidacionExportarTests(LiquidacionTestBase):
         fila_csv = next(reader)
 
         self.assertEqual(fila_csv["INC – Cuenta contable"], "N/A")
+
+    def test_exporta_csv_total_neto_sin_parametrizacion_generar_na(self):
+        self.parametros["TOTAL_NETO"].delete()
+        fila = self.build_fila_payload()
+        fila["cuentas"]["total_neto"] = None
+        payload = quote(json.dumps({"filas": [fila]}))
+        url = reverse("liquidacion_exportar") + f"?formato=csv&payload={payload}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        contenido = response.content.decode("utf-8").splitlines()
+        reader = csv.DictReader(contenido)
+        fila_csv = next(reader)
+
+        self.assertEqual(fila_csv["Total neto – Cuenta contable"], "N/A")
 
 
 class LogoutFlowTests(EmpresaTestMixin, TestCase):

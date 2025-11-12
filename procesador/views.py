@@ -659,7 +659,11 @@ def _validar_filas_liquidacion(
                 total_calculado = subtotal + iva + inc - retefuente_val - reteica_val - reteiva_val
                 casilla_info["valor"] = total_calculado
                 casilla_info["monto"] = total_calculado
-                if total_calculado != Decimal("0") and cuenta_id in (None, ""):
+                if (
+                    total_calculado != Decimal("0")
+                    and cuenta_id in (None, "")
+                    and not sin_opciones
+                ):
                     errores.append(
                         {
                             "fila": indice,
