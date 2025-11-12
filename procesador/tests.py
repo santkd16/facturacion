@@ -528,6 +528,7 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
             resultado["cuentas"]["subtotal"], self.parametros["SUBTOTAL"].id
         )
         self.assertEqual(resultado["porcentajes"]["retefuente"], "4.0000")
+        self.assertTrue(resultado["listo"])
 
     def test_error_por_cuenta_obligatoria(self):
         fila = self.build_fila_payload()
@@ -542,6 +543,7 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
         self.assertFalse(data.get("valido", False))
         mensajes = " ".join(error["mensaje"] for error in data["errores"])
         self.assertIn("El campo ‘Cuenta contable’ es obligatorio", mensajes)
+        self.assertFalse(data["filas"][0]["listo"])
 
     def test_error_por_cuenta_de_otro_proveedor(self):
         otro_proveedor = Proveedor.objects.create(
@@ -568,18 +570,56 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
         mensajes = " ".join(error["mensaje"] for error in data["errores"])
         self.assertIn("La cuenta seleccionada no pertenece al proveedor", mensajes)
 
-    def test_error_por_falta_parametrizacion_retefuente(self):
+    def test_validacion_sin_parametrizacion_retencion_devuelve_na(self):
         self.parametros["RETEFUENTE"].delete()
         fila = self.build_fila_payload()
+        fila["cuentas"]["retefuente"] = None
         response = self.client.post(
             reverse("liquidacion_validar"),
             data=json.dumps({"filas": [fila]}),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200)
         data = response.json()
-        mensajes = " ".join(error["mensaje"] for error in data["errores"])
-        self.assertIn("El proveedor no tiene parametrizadas opciones para ReteFuente", mensajes)
+        self.assertTrue(data["valido"])
+        self.assertEqual(len(data["errores"]), 0)
+        resultado = data["filas"][0]
+        self.assertIsNone(resultado["cuentas"].get("retefuente"))
+        self.assertTrue(resultado["listo"])
+
+    def test_validacion_sin_parametrizacion_valor_fijo_devuelve_na(self):
+        self.parametros["IVA"].delete()
+        fila = self.build_fila_payload()
+        fila["cuentas"]["iva"] = None
+        response = self.client.post(
+            reverse("liquidacion_validar"),
+            data=json.dumps({"filas": [fila]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["valido"])
+        self.assertEqual(len(data["errores"]), 0)
+        resultado = data["filas"][0]
+        self.assertIsNone(resultado["cuentas"].get("iva"))
+        self.assertTrue(resultado["listo"])
+
+    def test_validacion_total_neto_sin_parametrizacion_devuelve_na(self):
+        self.parametros["TOTAL_NETO"].delete()
+        fila = self.build_fila_payload()
+        fila["cuentas"]["total_neto"] = None
+        response = self.client.post(
+            reverse("liquidacion_validar"),
+            data=json.dumps({"filas": [fila]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["valido"])
+        self.assertEqual(len(data["errores"]), 0)
+        resultado = data["filas"][0]
+        self.assertIsNone(resultado["cuentas"].get("total_neto"))
+        self.assertTrue(resultado["listo"])
 
 
 class LiquidacionExportarTests(LiquidacionTestBase):
@@ -608,6 +648,47 @@ class LiquidacionExportarTests(LiquidacionTestBase):
             fila_csv["Total neto – Cuenta contable"],
             self.cuentas["TOTAL_NETO"].codigo,
         )
+        self.assertEqual(fila_csv["INC – Cuenta contable"], "N/A")
+
+    def test_exporta_csv_valor_cero_generar_na(self):
+        fila = self.build_fila_payload()
+        fila["importes"]["iva"] = self._format_decimal(Decimal("0.00"))
+        payload = quote(json.dumps({"filas": [fila]}))
+        url = reverse("liquidacion_exportar") + f"?formato=csv&payload={payload}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        contenido = response.content.decode("utf-8").splitlines()
+        reader = csv.DictReader(contenido)
+        fila_csv = next(reader)
+
+        self.assertEqual(fila_csv["IVA – Cuenta contable"], "N/A")
+
+    def test_exporta_csv_campo_vacio_generar_na(self):
+        fila = self.build_fila_payload()
+        fila["cuentas"]["inc"] = None
+        payload = quote(json.dumps({"filas": [fila]}))
+        url = reverse("liquidacion_exportar") + f"?formato=csv&payload={payload}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        contenido = response.content.decode("utf-8").splitlines()
+        reader = csv.DictReader(contenido)
+        fila_csv = next(reader)
+
+        self.assertEqual(fila_csv["INC – Cuenta contable"], "N/A")
+
+    def test_exporta_csv_total_neto_sin_parametrizacion_generar_na(self):
+        self.parametros["TOTAL_NETO"].delete()
+        fila = self.build_fila_payload()
+        fila["cuentas"]["total_neto"] = None
+        payload = quote(json.dumps({"filas": [fila]}))
+        url = reverse("liquidacion_exportar") + f"?formato=csv&payload={payload}"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        contenido = response.content.decode("utf-8").splitlines()
+        reader = csv.DictReader(contenido)
+        fila_csv = next(reader)
+
+        self.assertEqual(fila_csv["Total neto – Cuenta contable"], "N/A")
 
 
 class LogoutFlowTests(EmpresaTestMixin, TestCase):
