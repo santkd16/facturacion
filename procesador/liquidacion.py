@@ -72,7 +72,7 @@ CASILLA_RULES = {
     "TOTAL_NETO": {
         "prefijos": ("2335",),
         "mensaje_sin_opciones": "No hay opciones disponibles para esta casilla; parametrice el proveedor.",
-        "naturaleza": "D",
+        "naturaleza": "C",
     },
 }
 
