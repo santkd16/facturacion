@@ -518,14 +518,6 @@ def _validar_filas_liquidacion(
 
             if monto != Decimal("0"):
                 if cuenta_id in (None, "") and opciones:
-                    errores.append(
-                        {
-                            "fila": indice,
-                            "factura_id": fila.get("factura_id"),
-                            "campo": campo,
-                            "mensaje": CAMPO_OBLIGATORIO_MSG,
-                        }
-                    )
                     fila_valida = False
 
             if cuenta_id not in (None, ""):
@@ -664,14 +656,6 @@ def _validar_filas_liquidacion(
                     and cuenta_id in (None, "")
                     and not sin_opciones
                 ):
-                    errores.append(
-                        {
-                            "fila": indice,
-                            "factura_id": fila.get("factura_id"),
-                            "campo": campo,
-                            "mensaje": CAMPO_OBLIGATORIO_MSG,
-                        }
-                    )
                     fila_valida = False
 
             casillas_resultado[casilla] = casilla_info
@@ -862,15 +846,6 @@ def liquidacion_exportar(request):
             info = casillas.get(casilla, {})
             catalogo = info.get("catalogo")
             if info.get("sin_opciones"):
-                return "N/A"
-            valor = info.get("valor")
-            if valor is None:
-                valor = info.get("monto")
-            if isinstance(valor, Decimal):
-                valor_decimal = valor
-            else:
-                valor_decimal = _parse_decimal(valor)
-            if valor_decimal == Decimal("0"):
                 return "N/A"
             if not catalogo:
                 return "N/A"

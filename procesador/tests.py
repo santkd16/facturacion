@@ -530,7 +530,7 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
         self.assertEqual(resultado["porcentajes"]["retefuente"], "4.0000")
         self.assertTrue(resultado["listo"])
 
-    def test_error_por_cuenta_obligatoria(self):
+    def test_omitir_cuenta_no_bloquea_validacion(self):
         fila = self.build_fila_payload()
         fila["cuentas"]["subtotal"] = None
         response = self.client.post(
@@ -538,11 +538,10 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
             data=json.dumps({"filas": [fila]}),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertFalse(data.get("valido", False))
-        mensajes = " ".join(error["mensaje"] for error in data["errores"])
-        self.assertIn("El campo ‘Cuenta contable’ es obligatorio", mensajes)
+        self.assertTrue(data.get("valido", False))
+        self.assertEqual(len(data.get("errores", [])), 0)
         self.assertFalse(data["filas"][0]["listo"])
 
     def test_error_por_cuenta_de_otro_proveedor(self):
@@ -650,7 +649,7 @@ class LiquidacionExportarTests(LiquidacionTestBase):
         )
         self.assertEqual(fila_csv["INC – Cuenta contable"], "N/A")
 
-    def test_exporta_csv_valor_cero_generar_na(self):
+    def test_exporta_csv_valor_cero_conserva_cuenta(self):
         fila = self.build_fila_payload()
         fila["importes"]["iva"] = self._format_decimal(Decimal("0.00"))
         payload = quote(json.dumps({"filas": [fila]}))
@@ -661,7 +660,9 @@ class LiquidacionExportarTests(LiquidacionTestBase):
         reader = csv.DictReader(contenido)
         fila_csv = next(reader)
 
-        self.assertEqual(fila_csv["IVA – Cuenta contable"], "N/A")
+        self.assertEqual(
+            fila_csv["IVA – Cuenta contable"], self.cuentas["IVA"].codigo
+        )
 
     def test_exporta_csv_campo_vacio_generar_na(self):
         fila = self.build_fila_payload()
