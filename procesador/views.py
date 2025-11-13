@@ -59,12 +59,17 @@ def _parse_decimal(value, default: Decimal = Decimal("0")) -> Decimal:
     if value is None:
         return default
     cleaned = str(value).strip().replace("$", "")
+    cleaned = cleaned.replace("\xa0", "").replace(" ", "")
     if not cleaned:
         return default
-    # convert decimal with comma as decimal separator
-    if cleaned.count(",") == 1 and cleaned.count(".") == 0:
+    # Normalise thousand/decimal separators commonly used in the UI payload
+    if cleaned.count(",") == 1:
+        if cleaned.count(".") >= 1:
+            cleaned = cleaned.replace(".", "")
         cleaned = cleaned.replace(",", ".")
     else:
+        if cleaned.count(".") > 1:
+            cleaned = cleaned.replace(".", "")
         cleaned = cleaned.replace(",", "")
     try:
         return Decimal(cleaned)

@@ -393,6 +393,31 @@
       });
     }
 
+    function normalizarNumeroTexto(texto) {
+      if (texto === null || texto === undefined) {
+        return 0;
+      }
+      let valor = String(texto).trim().replace(/\s+/g, '');
+      if (!valor) {
+        return 0;
+      }
+      if (valor.includes(',') && valor.includes('.')) {
+        valor = valor.replace(/\./g, '').replace(',', '.');
+      } else if (valor.includes(',')) {
+        valor = valor.replace(',', '.');
+      }
+      const numero = Number(valor);
+      return Number.isFinite(numero) ? numero : 0;
+    }
+
+    function formatearValorEnvio(valor, decimales = 2) {
+      const numero = Number(valor);
+      if (!Number.isFinite(numero)) {
+        return (0).toFixed(decimales);
+      }
+      return numero.toFixed(decimales);
+    }
+
     function refrescarEstadoSelects(tr, totales) {
       tr.querySelectorAll('select.cuenta-select').forEach((select) => {
         const td = select.closest('td');
@@ -651,25 +676,46 @@
           cuentas: {},
           porcentajes: {},
         };
-        ['SUBTOTAL', 'IVA', 'INC', 'TOTAL_NETO'].forEach((casilla) => {
-          const campo = {
-            SUBTOTAL: 'subtotal',
-            IVA: 'iva',
-            INC: 'inc',
-            TOTAL_NETO: 'total_neto',
-          }[casilla];
-          const valor = casilla === 'TOTAL_NETO' ? totales.totalNeto : Number(tr.dataset[campo.replace('_', '')] || totales[campo]);
-          fila.importes[campo] = formatearNumero(valor, 2);
+        [
+          { casilla: 'SUBTOTAL', campo: 'subtotal', totalKey: 'subtotal' },
+          { casilla: 'IVA', campo: 'iva', totalKey: 'iva' },
+          { casilla: 'INC', campo: 'inc', totalKey: 'inc' },
+          { casilla: 'TOTAL_NETO', campo: 'total_neto', totalKey: 'totalNeto' },
+        ].forEach(({ casilla, campo, totalKey }) => {
+          let valorNumerico = Number(totales?.[totalKey]);
+          if (!Number.isFinite(valorNumerico)) {
+            if (campo === 'total_neto') {
+              valorNumerico = normalizarNumeroTexto(tr.dataset.totalNetoBase);
+            } else {
+              valorNumerico = normalizarNumeroTexto(tr.dataset[campo]);
+            }
+          }
+          fila.importes[campo] = formatearValorEnvio(valorNumerico, 2);
           const select = tr.querySelector(`select[data-casilla="${casilla}"]`);
           fila.cuentas[campo] = obtenerValorCuenta(select);
         });
         ['RETEFUENTE', 'RETEICA', 'RETEIVA'].forEach((casilla) => {
           const campo = CASILLA_FIELD_MAP[casilla];
           const select = tr.querySelector(`select[data-casilla="${casilla}"]`);
-          const porcentajeEl = tr.querySelector(`.porcentaje[data-casilla="${casilla}"]`);
-          const valorEl = tr.querySelector(`.valor-retencion[data-casilla="${casilla}"]`);
-          fila.importes[campo] = valorEl ? valorEl.textContent : '0.00';
-          fila.porcentajes[campo] = porcentajeEl ? porcentajeEl.textContent : '0.0000';
+          let valorRetencion = Number(totales?.[campo]);
+          if (!Number.isFinite(valorRetencion)) {
+            const valorEl = tr.querySelector(`.valor-retencion[data-casilla="${casilla}"]`);
+            valorRetencion = normalizarNumeroTexto(valorEl ? valorEl.textContent : '0');
+          }
+          let porcentaje = 0;
+          const opcion = select?.selectedOptions?.[0];
+          if (opcion && opcion.dataset) {
+            const porcentajeOpcion = Number(opcion.dataset.porcentaje);
+            if (Number.isFinite(porcentajeOpcion)) {
+              porcentaje = porcentajeOpcion;
+            }
+          }
+          if (!Number.isFinite(porcentaje)) {
+            const porcentajeEl = tr.querySelector(`.porcentaje[data-casilla="${casilla}"]`);
+            porcentaje = normalizarNumeroTexto(porcentajeEl ? porcentajeEl.textContent : '0');
+          }
+          fila.importes[campo] = formatearValorEnvio(valorRetencion, 2);
+          fila.porcentajes[campo] = formatearValorEnvio(porcentaje, 4);
           fila.cuentas[campo] = obtenerValorCuenta(select);
         });
         filas.push(fila);
