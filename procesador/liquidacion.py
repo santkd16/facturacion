@@ -39,38 +39,38 @@ CATALOGO_RESPONSE_KEYS = {
 
 CASILLA_RULES = {
     "SUBTOTAL": {
-        "prefijos": ("2310", "2432"),
+        "prefijos": ("2310", "2432","N/A","na","BSP","bsp"),
         "excluir": ("231053152007",),
         "mensaje_sin_opciones": "No hay opciones disponibles para esta casilla; parametrice el proveedor.",
         "naturaleza": "D",
     },
     "IVA": {
-        "prefijos": ("2408",),
+        "prefijos": ("2408","N/A","na","BSP","bsp"),
         "mensaje_sin_opciones": "No hay opciones disponibles para esta casilla; parametrice el proveedor.",
         "naturaleza": "D",
     },
     "INC": {
-        "prefijos": ("231053152007",),
+        "prefijos": ("231053152007","N/A","na","BSP","bsp"),
         "mensaje_sin_opciones": "No hay opciones disponibles para esta casilla; parametrice el proveedor.",
         "naturaleza": "D",
     },
     "RETEFUENTE": {
-        "prefijos": ("2365",),
+        "prefijos": ("2365","N/A","na","BSP","bsp"),
         "mensaje_sin_opciones": "El proveedor no tiene parametrizadas opciones para ReteFuente.",
         "naturaleza": "C",
     },
     "RETEICA": {
-        "prefijos": ("2368",),
+        "prefijos": ("2368","N/A","na","BSP","bsp"),
         "mensaje_sin_opciones": "El proveedor no tiene parametrizadas opciones para esta retención.",
         "naturaleza": "C",
     },
     "RETEIVA": {
-        "prefijos": ("2367",),
+        "prefijos": ("2367","N/A","na","BSP","bsp"),
         "mensaje_sin_opciones": "El proveedor no tiene parametrizadas opciones para esta retención.",
         "naturaleza": "C",
     },
     "TOTAL_NETO": {
-        "prefijos": ("2335",),
+        "prefijos": ("2335","N/A","na","BSP","bsp"),
         "mensaje_sin_opciones": "No hay opciones disponibles para esta casilla; parametrice el proveedor.",
         "naturaleza": "D",
     },
@@ -93,25 +93,41 @@ def es_cuenta_inc_exclusiva(codigo: str) -> bool:
 
 def validar_prefijo_para_casilla(casilla: str, codigo: str) -> Optional[str]:
     if not codigo:
+        # Sin cuenta seleccionada, no hay nada que validar
         return None
 
+    reglas = CASILLA_RULES[casilla]
+
+    # === CASILLA INC ===
+    # Para INC queremos permitir:
+    # - La cuenta exclusiva 231053152007
+    # - La "cuenta" N/A (cuando no aplica INC)
+    if casilla == "INC":
+        if codigo == "231053152007":
+            return None
+        if codigo.upper() in {"N/A", "NA","BSP","bsp"}:
+            return None
+        # Cualquier otra cosa en INC es error
+        return "La cuenta 231053152007 es exclusiva de INC."
+
+    # === OTRAS CASILLAS (no INC) ===
+
+    # La cuenta exclusiva de INC NO se puede usar en otras casillas
     if es_cuenta_inc_exclusiva(codigo) and casilla != "INC":
         return "La cuenta 231053152007 es exclusiva de INC."
 
-    reglas = CASILLA_RULES[casilla]
-    if casilla == "INC":
-        if codigo != "231053152007":
-            return "La cuenta 231053152007 es exclusiva de INC."
-        return None
-
+    # Exclusiones específicas por casilla (por si las configuras en CASILLA_RULES)
     if "excluir" in reglas and codigo in reglas["excluir"]:
-        return "La cuenta 231053152007 es exclusiva de INC."
+        return "La cuenta seleccionada no corresponde a la casilla esperada."
 
+    # Validación por prefijo
     prefijos = reglas.get("prefijos", ())
     if prefijos and not any(codigo.startswith(pref) for pref in prefijos):
         return "La cuenta seleccionada no corresponde a la casilla esperada."
 
+    # Todo OK
     return None
+
 
 
 def agrupar_catalogos_por_proveedor(

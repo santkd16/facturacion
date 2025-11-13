@@ -470,6 +470,8 @@ def _validar_filas_liquidacion(
         porcentajes = fila.get("porcentajes") or {}
         proveedor_id = fila.get("proveedor_id")
 
+        fila_valida = True
+
         subtotal = _parse_decimal(importes.get("subtotal"))
         iva = _parse_decimal(importes.get("iva"))
         inc = _parse_decimal(importes.get("inc"))
@@ -581,6 +583,7 @@ def _validar_filas_liquidacion(
                 "reteica": reteica_val,
                 "reteiva": reteiva_val,
                 "total_neto": subtotal + iva + inc - retefuente_val - reteica_val - reteiva_val,
+                "valida": fila_valida,
             }
         )
 
@@ -595,6 +598,7 @@ def _serializar_fila_validada(fila: dict) -> dict:
         "importes": {},
         "cuentas": {},
         "porcentajes": {},
+        "listo": fila.get("valida", False),
     }
 
     for casilla, info in fila["casillas"].items():
