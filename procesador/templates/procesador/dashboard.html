@@ -26,13 +26,6 @@
     td.cuenta .alerta { display:block; font-size:0.75rem; color:#c0392b; margin-top:0.25rem; }
     td.valor, td.valor-retencion { text-align:right; }
     td.porcentaje { text-align:right; min-width:90px; }
-    td.estado-listo { text-align:center; white-space:nowrap; }
-    td.estado-listo label { display:flex; align-items:center; justify-content:center; gap:.35rem; font-size:.85rem; cursor:default; }
-    td.estado-listo input { accent-color:#1d70b8; pointer-events:none; }
-    td.estado-listo .estado-texto { font-weight:600; }
-    td.estado-listo .estado-texto.estado-ok { color:#1e7e34; }
-    td.estado-listo .estado-texto.estado-pendiente { color:#c0392b; }
-    .fila-lista { background:#f5fbf0; }
     .panel-filtros { border:1px solid #ccc; border-radius:6px; padding:0.75rem 1rem; margin:0.75rem 0; background:#f9fbfd; }
     .panel-filtros__contenedor { display:flex; flex-wrap:wrap; gap:1rem; align-items:flex-end; }
     .panel-filtros label { display:flex; flex-direction:column; font-size:0.85rem; color:#333; }
@@ -206,10 +199,6 @@
             <option value="proveedor_asc">Proveedor (A-Z)</option>
             <option value="proveedor_desc">Proveedor (Z-A)</option>
           </select>
-        </label>
-        <label class="panel-filtros__check">
-          <input type="checkbox" id="filtro-listo">
-          <span>Solo proveedores listos</span>
         </label>
         <div class="panel-filtros__acciones">
           <button type="button" id="btn-aplicar-filtros" class="btn-primario">Aplicar</button>
@@ -608,15 +597,14 @@
     }
 
     const filasTabla = Array.from(document.querySelectorAll('#tbody-liq tr'));
-    const inicializaciones = filasTabla.map((tr) => {
-      actualizarEstadoListo(tr, tr.dataset.listo === 'true');
-      return inicializarFila(tr);
-    });
-    Promise.all(inicializaciones).then(() => {
-      if (filasTabla.length) {
-        validarFilas({ mostrarMensajes: false });
-      }
-    });
+    const inicializaciones = filasTabla.map((tr) => inicializarFila(tr));
+    Promise.all(inicializaciones)
+      .then(() => {
+        aplicarFiltros();
+      })
+      .catch((error) => {
+        console.error('Error inicializando filas', error);
+      });
 
     document.addEventListener('change', (evento) => {
       if (evento.target.matches('#tbody-liq select.cuenta-select')) {
@@ -624,7 +612,6 @@
         if (!tr) return;
         const totales = recalcularTotales(tr);
         refrescarEstadoSelects(tr, totales);
-        actualizarEstadoListo(tr, false);
         aplicarFiltros();
       }
     });
@@ -689,24 +676,7 @@
     const filtroFechaDesde = document.getElementById('filtro-fecha-desde');
     const filtroFechaHasta = document.getElementById('filtro-fecha-hasta');
     const filtroProveedor = document.getElementById('filtro-proveedor');
-    const filtroListo = document.getElementById('filtro-listo');
     const filtroOrden = document.getElementById('filtro-orden');
-
-    function actualizarEstadoListo(tr, listo) {
-      const estado = Boolean(listo);
-      tr.dataset.listo = estado ? 'true' : 'false';
-      tr.classList.toggle('fila-lista', estado);
-      const checkbox = tr.querySelector('.marca-listo');
-      if (checkbox) {
-        checkbox.checked = estado;
-      }
-      const texto = tr.querySelector('.estado-texto');
-      if (texto) {
-        texto.textContent = estado ? 'Listo' : 'Pendiente';
-        texto.classList.toggle('estado-ok', estado);
-        texto.classList.toggle('estado-pendiente', !estado);
-      }
-    }
 
     function compararFechas(a, b, factor) {
       const fechaA = a.dataset.fecha || '';
@@ -748,22 +718,11 @@
       });
     }
 
-    function aplicarResultadoValidacion(resultados) {
-      const filasDom = Array.from(document.querySelectorAll('#tbody-liq tr'));
-      filasDom.forEach((tr, indice) => {
-        const info = Array.isArray(resultados) ? resultados[indice] : undefined;
-        const listo = info ? Boolean(info.listo) : false;
-        actualizarEstadoListo(tr, listo);
-      });
-      aplicarFiltros();
-    }
-
     function aplicarFiltros() {
       ordenarFilas();
       const desde = filtroFechaDesde?.value || '';
       const hasta = filtroFechaHasta?.value || '';
       const proveedor = filtroProveedor?.value || '';
-      const soloListos = filtroListo?.checked || false;
 
       document.querySelectorAll('#tbody-liq tr').forEach((tr) => {
         let visible = true;
@@ -783,11 +742,6 @@
             visible = false;
           }
         }
-        if (visible && soloListos) {
-          if (tr.dataset.listo !== 'true') {
-            visible = false;
-          }
-        }
         tr.style.display = visible ? '' : 'none';
       });
     }
@@ -796,7 +750,6 @@
       if (filtroFechaDesde) filtroFechaDesde.value = '';
       if (filtroFechaHasta) filtroFechaHasta.value = '';
       if (filtroProveedor) filtroProveedor.value = '';
-      if (filtroListo) filtroListo.checked = false;
       aplicarFiltros();
     }
 
@@ -813,7 +766,7 @@
     document.getElementById('btn-aplicar-filtros')?.addEventListener('click', aplicarFiltros);
     document.getElementById('btn-limpiar-filtros')?.addEventListener('click', limpiarFiltros);
 
-    [filtroFechaDesde, filtroFechaHasta, filtroProveedor, filtroListo, filtroOrden].forEach((elemento) => {
+    [filtroFechaDesde, filtroFechaHasta, filtroProveedor, filtroOrden].forEach((elemento) => {
       elemento?.addEventListener('change', aplicarFiltros);
     });
 
@@ -833,27 +786,15 @@
           body: JSON.stringify({ filas }),
         });
         const datos = await respuesta.json();
-        if (Array.isArray(datos.filas)) {
-          aplicarResultadoValidacion(datos.filas);
-        } else {
-          aplicarResultadoValidacion([]);
-        }
-        if (respuesta.ok && datos.valido) {
+        if (respuesta.ok) {
+          aplicarFiltros();
           if (mostrarMensajes) {
             mostrarMensaje('La validación se completó correctamente.', 'success');
           }
           return { filas: datos.filas || filas, valido: true };
         }
-        const errores = datos.errores || [];
         if (mostrarMensajes) {
-          if (errores.length) {
-            const mensajes = errores
-              .map((err) => `Fila ${typeof err.fila === 'number' ? err.fila + 1 : ''}: ${err.mensaje}`)
-              .join('<br>');
-            mostrarMensaje(mensajes, 'error');
-          } else {
-            mostrarMensaje('La validación no se pudo completar.', 'error');
-          }
+          mostrarMensaje('La validación no se pudo completar.', 'error');
         }
         return { filas: datos.filas || filas, valido: false };
       } catch (error) {
@@ -861,7 +802,6 @@
         if (mostrarMensajes) {
           mostrarMensaje('No fue posible validar la información.', 'error');
         }
-        aplicarResultadoValidacion([]);
         return { filas, valido: false };
       }
     }
@@ -870,12 +810,9 @@
       validarFilas({ mostrarMensajes: true });
     });
 
-    document.getElementById('btn-exportar')?.addEventListener('click', async () => {
-      const resultado = await validarFilas({ mostrarMensajes: true });
-      if (!resultado || !resultado.valido) {
-        return;
-      }
-      const payload = encodeURIComponent(JSON.stringify({ filas: resultado.filas }));
+    document.getElementById('btn-exportar')?.addEventListener('click', () => {
+      const filas = recolectarFilas();
+      const payload = encodeURIComponent(JSON.stringify({ filas }));
       window.location.href = `{% url "liquidacion_exportar" %}?formato=csv&payload=${payload}`;
     });
   </script>

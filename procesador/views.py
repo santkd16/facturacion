@@ -17,11 +17,6 @@ from django.shortcuts import redirect, render
 from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_GET, require_POST
 
-NATURALEZA_ERROR_MSG = "La naturaleza de la cuenta seleccionada no coincide con la casilla esperada."
-CUENTA_PROVEEDOR_MSG = "La cuenta seleccionada no pertenece al proveedor de la factura."
-CASILLA_ERROR_MSG = "La cuenta seleccionada no corresponde a la casilla esperada."
-CAMPO_OBLIGATORIO_MSG = "El campo ‘Cuenta contable’ es obligatorio porque el importe es distinto de cero."
-
 
 from .forms import UploadExcelForm, UploadZipForm
 from .models import (
@@ -42,7 +37,6 @@ from .liquidacion import (
     agrupar_catalogos_por_proveedor,
     calcular_retencion,
     signo_por_naturaleza,
-    validar_prefijo_para_casilla,
 )
 
 # Namespaces for XML UBL
@@ -413,7 +407,6 @@ def dashboard(request):
             "total_neto": _decimal_to_str(total_neto_base),
             "total_neto_raw": str(total_neto_base),
             "coincide_xml": factura_xml is not None,
-            "listo": False,
         }
 
         if proveedor is not None:
@@ -449,17 +442,7 @@ def _validar_filas_liquidacion(
     empresa: Empresa,
 ):
     if not isinstance(filas, list):
-        return (
-            [
-                {
-                    "fila": None,
-                    "factura_id": None,
-                    "campo": None,
-                    "mensaje": "Formato inválido.",
-                }
-            ],
-            [],
-        )
+        return [], []
 
     proveedor_ids = {
         fila.get("proveedor_id")
@@ -472,7 +455,8 @@ def _validar_filas_liquidacion(
         empresa_id=empresa.id,
     )
 
-    errores: list[dict] = []
+    catalogos_extras: dict[int, CuentaContableProveedor] = {}
+
     filas_resultado: list[dict] = []
 
     for indice, fila in enumerate(filas):
@@ -496,7 +480,6 @@ def _validar_filas_liquidacion(
         for casilla in CASILLAS:
             campo = CASILLA_FIELD_MAP[casilla]
             monto = _parse_decimal(importes.get(campo))
-            monto_original = monto
             cuenta_id = cuentas.get(campo)
             if isinstance(cuenta_id, str):
                 cuenta_id_normalizado = cuenta_id.strip().upper()
@@ -513,114 +496,39 @@ def _validar_filas_liquidacion(
 
             opciones = catalogos_por_clave.get((proveedor_id, casilla), [])
             catalogo = None
-            catalogo_valido = True
-            sin_opciones = not opciones
-
-            if monto != Decimal("0"):
-                if cuenta_id in (None, "") and opciones:
-                    fila_valida = False
-
             if cuenta_id not in (None, ""):
                 try:
-                    catalogo = catalogos_por_id.get(int(cuenta_id))
+                    cuenta_pk = int(cuenta_id)
                 except (TypeError, ValueError):
                     catalogo = None
-                if catalogo is None:
-                    errores.append(
-                        {
-                            "fila": indice,
-                            "factura_id": fila.get("factura_id"),
-                            "campo": campo,
-                            "mensaje": CUENTA_PROVEEDOR_MSG,
-                        }
-                    )
-                    catalogo_valido = False
-                    fila_valida = False
-                elif proveedor_id is None or catalogo.proveedor_id != proveedor_id:
-                    errores.append(
-                        {
-                            "fila": indice,
-                            "factura_id": fila.get("factura_id"),
-                            "campo": campo,
-                            "mensaje": CUENTA_PROVEEDOR_MSG,
-                        }
-                    )
-                    catalogo_valido = False
-                    fila_valida = False
-                elif catalogo.casilla != casilla:
-                    errores.append(
-                        {
-                            "fila": indice,
-                            "factura_id": fila.get("factura_id"),
-                            "campo": campo,
-                            "mensaje": CASILLA_ERROR_MSG,
-                        }
-                    )
-                    catalogo_valido = False
-                    fila_valida = False
                 else:
-                    mensaje_prefijo = validar_prefijo_para_casilla(
-                        casilla, catalogo.cuenta.codigo
-                    )
-                    if mensaje_prefijo:
-                        errores.append(
-                            {
-                                "fila": indice,
-                                "factura_id": fila.get("factura_id"),
-                                "campo": campo,
-                                "mensaje": mensaje_prefijo,
-                            }
-                        )
-                        catalogo_valido = False
-                        fila_valida = False
-                if (
-                    catalogo_valido
-                    and catalogo is not None
-                    and catalogo.naturaleza
-                    != CASILLA_RULES[casilla]["naturaleza"]
-                ):
-                    errores.append(
-                        {
-                            "fila": indice,
-                            "factura_id": fila.get("factura_id"),
-                            "campo": campo,
-                            "mensaje": NATURALEZA_ERROR_MSG,
-                        }
-                    )
-                    catalogo_valido = False
-                    fila_valida = False
+                    catalogo = catalogos_por_id.get(cuenta_pk)
+                    if catalogo is None:
+                        catalogo = catalogos_extras.get(cuenta_pk)
+                        if catalogo is None:
+                            catalogo = (
+                                CuentaContableProveedor.objects.filter(pk=cuenta_pk)
+                                .select_related("cuenta")
+                                .first()
+                            )
+                            if catalogo is not None:
+                                catalogos_extras[cuenta_pk] = catalogo
 
             casilla_info = {
                 "monto": monto,
-                "catalogo": catalogo if catalogo_valido else None,
+                "catalogo": catalogo,
                 "porcentaje": None,
                 "valor": None,
                 "naturaleza": (
                     catalogo.naturaleza
-                    if catalogo_valido and catalogo is not None
+                    if catalogo is not None and catalogo.naturaleza
                     else CASILLA_RULES[casilla]["naturaleza"]
                 ),
-                "sin_opciones": sin_opciones,
+                "sin_opciones": not opciones,
             }
 
-            if (
-                casilla in RETENCIONES
-                and catalogo_valido
-                and catalogo is not None
-            ):
-                if catalogo.porcentaje is None:
-                    errores.append(
-                        {
-                            "fila": indice,
-                            "factura_id": fila.get("factura_id"),
-                            "campo": campo,
-                            "mensaje": CASILLA_RULES[casilla][
-                                "mensaje_sin_opciones"
-                            ],
-                        }
-                    )
-                    fila_valida = False
-                else:
+            if casilla in RETENCIONES:
+                if catalogo is not None and catalogo.porcentaje is not None:
                     porcentaje_calc, valor_calc = calcular_retencion(
                         subtotal, catalogo
                     )
@@ -633,30 +541,26 @@ def _validar_filas_liquidacion(
                         reteica_val = valor_calc
                     elif casilla == "RETEIVA":
                         reteiva_val = valor_calc
-            elif casilla in RETENCIONES:
-                casilla_info["porcentaje"] = (
-                    porcentaje_input if porcentaje_input is not None else Decimal("0")
-                )
-                casilla_info["valor"] = monto
-                if casilla == "RETEFUENTE":
-                    retefuente_val = monto
-                elif casilla == "RETEICA":
-                    reteica_val = monto
-                elif casilla == "RETEIVA":
-                    reteiva_val = monto
+                else:
+                    casilla_info["porcentaje"] = (
+                        porcentaje_input if porcentaje_input is not None else Decimal("0")
+                    )
+                    casilla_info["valor"] = monto
+                    if casilla == "RETEFUENTE":
+                        retefuente_val = monto
+                    elif casilla == "RETEICA":
+                        reteica_val = monto
+                    elif casilla == "RETEIVA":
+                        reteiva_val = monto
             else:
                 casilla_info["valor"] = monto
 
             if casilla == "TOTAL_NETO":
-                total_calculado = subtotal + iva + inc - retefuente_val - reteica_val - reteiva_val
+                total_calculado = (
+                    subtotal + iva + inc - retefuente_val - reteica_val - reteiva_val
+                )
                 casilla_info["valor"] = total_calculado
                 casilla_info["monto"] = total_calculado
-                if (
-                    total_calculado != Decimal("0")
-                    and cuenta_id in (None, "")
-                    and not sin_opciones
-                ):
-                    fila_valida = False
 
             casillas_resultado[casilla] = casilla_info
 
@@ -678,7 +582,7 @@ def _validar_filas_liquidacion(
             }
         )
 
-    return errores, filas_resultado
+    return [], filas_resultado
 
 
 def _serializar_fila_validada(fila: dict) -> dict:
@@ -695,9 +599,12 @@ def _serializar_fila_validada(fila: dict) -> dict:
     for casilla, info in fila["casillas"].items():
         campo = CASILLA_FIELD_MAP[casilla]
         datos["importes"][campo] = _decimal_to_str(info["valor"] or info["monto"])
-        datos["cuentas"][campo] = (
-            info["catalogo"].id if info["catalogo"] is not None else None
-        )
+        if info["catalogo"] is not None:
+            datos["cuentas"][campo] = info["catalogo"].id
+        else:
+            datos["cuentas"][campo] = (
+                (fila["original"].get("cuentas") or {}).get(campo)
+            )
         if casilla in RETENCIONES:
             porcentaje = info.get("porcentaje") or Decimal("0")
             datos["porcentajes"][campo] = _decimal_to_str(porcentaje, places=4)
@@ -769,15 +676,15 @@ def liquidacion_validar(request):
         return JsonResponse({"detail": "JSON inválido."}, status=400)
 
     filas = payload.get("filas", [])
-    errores, filas_resultado = _validar_filas_liquidacion(filas, empresa)
+    _, filas_resultado = _validar_filas_liquidacion(filas, empresa)
 
     return JsonResponse(
         {
-            "valido": not errores,
-            "errores": errores,
+            "valido": True,
+            "errores": [],
             "filas": [_serializar_fila_validada(fila) for fila in filas_resultado],
         },
-        status=200 if not errores else 400,
+        status=200,
     )
 
 
@@ -801,9 +708,7 @@ def liquidacion_exportar(request):
         return JsonResponse({"detail": "JSON inválido."}, status=400)
 
     filas = data.get("filas", [])
-    errores, filas_resultado = _validar_filas_liquidacion(filas, empresa)
-    if errores:
-        return JsonResponse({"errores": errores}, status=400)
+    _, filas_resultado = _validar_filas_liquidacion(filas, empresa)
 
     import csv
     import io

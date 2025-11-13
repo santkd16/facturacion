@@ -522,6 +522,7 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data["valido"])
+        self.assertEqual(data["errores"], [])
         self.assertEqual(len(data["filas"]), 1)
         resultado = data["filas"][0]
         self.assertEqual(
@@ -542,9 +543,9 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
         data = response.json()
         self.assertTrue(data.get("valido", False))
         self.assertEqual(len(data.get("errores", [])), 0)
-        self.assertFalse(data["filas"][0]["listo"])
+        self.assertIsNone(data["filas"][0]["cuentas"]["subtotal"])
 
-    def test_error_por_cuenta_de_otro_proveedor(self):
+    def test_cuenta_de_otro_proveedor_no_bloquea(self):
         otro_proveedor = Proveedor.objects.create(
             empresa=self.empresa, nit="800123456", nombre="Proveedor 2"
         )
@@ -564,10 +565,11 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
             data=json.dumps({"filas": [fila]}),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200)
         data = response.json()
-        mensajes = " ".join(error["mensaje"] for error in data["errores"])
-        self.assertIn("La cuenta seleccionada no pertenece al proveedor", mensajes)
+        self.assertTrue(data.get("valido", False))
+        self.assertEqual(len(data.get("errores", [])), 0)
+        self.assertEqual(data["filas"][0]["cuentas"]["subtotal"], parametro_otro.id)
 
     def test_validacion_sin_parametrizacion_retencion_devuelve_na(self):
         self.parametros["RETEFUENTE"].delete()
@@ -584,7 +586,6 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
         self.assertEqual(len(data["errores"]), 0)
         resultado = data["filas"][0]
         self.assertIsNone(resultado["cuentas"].get("retefuente"))
-        self.assertTrue(resultado["listo"])
 
     def test_validacion_sin_parametrizacion_valor_fijo_devuelve_na(self):
         self.parametros["IVA"].delete()
@@ -601,7 +602,6 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
         self.assertEqual(len(data["errores"]), 0)
         resultado = data["filas"][0]
         self.assertIsNone(resultado["cuentas"].get("iva"))
-        self.assertTrue(resultado["listo"])
 
     def test_validacion_total_neto_sin_parametrizacion_devuelve_na(self):
         self.parametros["TOTAL_NETO"].delete()
@@ -618,7 +618,6 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
         self.assertEqual(len(data["errores"]), 0)
         resultado = data["filas"][0]
         self.assertIsNone(resultado["cuentas"].get("total_neto"))
-        self.assertTrue(resultado["listo"])
 
 
 class LiquidacionExportarTests(LiquidacionTestBase):
