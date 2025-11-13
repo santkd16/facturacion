@@ -15,7 +15,7 @@ from django.db.utils import DatabaseError, ProgrammingError
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.dateparse import parse_date
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 
 from .forms import UploadExcelForm, UploadZipForm
@@ -689,7 +689,7 @@ def liquidacion_validar(request):
 
 
 @login_required
-@require_GET
+@require_http_methods(["GET", "POST"])
 def liquidacion_exportar(request):
     ensure_fecha_documento_column()
     empresa = _obtener_empresa_actual(request)
@@ -697,13 +697,17 @@ def liquidacion_exportar(request):
         messages.info(request, "Selecciona una empresa para continuar.")
         return redirect("seleccionar_empresa")
 
-    formato = request.GET.get("formato")
+    if request.method == "POST":
+        formato = request.POST.get("formato")
+        payload_raw = request.POST.get("payload", "{}")
+    else:
+        formato = request.GET.get("formato")
+        payload_raw = request.GET.get("payload", "{}")
     if formato != "csv":
         return JsonResponse({"detail": "Formato no soportado."}, status=400)
 
-    payload = request.GET.get("payload", "{}")
     try:
-        data = json.loads(payload)
+        data = json.loads(payload_raw)
     except json.JSONDecodeError:
         return JsonResponse({"detail": "JSON inválido."}, status=400)
 

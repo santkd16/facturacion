@@ -6,7 +6,6 @@ import zipfile
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
-from urllib.parse import quote
 
 import pandas as pd
 from django.contrib.auth import get_user_model
@@ -623,9 +622,13 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
 class LiquidacionExportarTests(LiquidacionTestBase):
     def test_exporta_csv_con_cuentas(self):
         fila = self.build_fila_payload()
-        payload = quote(json.dumps({"filas": [fila]}))
-        url = reverse("liquidacion_exportar") + f"?formato=csv&payload={payload}"
-        response = self.client.get(url)
+        response = self.client.post(
+            reverse("liquidacion_exportar"),
+            data={
+                "formato": "csv",
+                "payload": json.dumps({"filas": [fila]}),
+            },
+        )
         self.assertEqual(response.status_code, 200)
         contenido = response.content.decode("utf-8").splitlines()
         reader = csv.DictReader(contenido)
@@ -651,9 +654,13 @@ class LiquidacionExportarTests(LiquidacionTestBase):
     def test_exporta_csv_valor_cero_conserva_cuenta(self):
         fila = self.build_fila_payload()
         fila["importes"]["iva"] = self._format_decimal(Decimal("0.00"))
-        payload = quote(json.dumps({"filas": [fila]}))
-        url = reverse("liquidacion_exportar") + f"?formato=csv&payload={payload}"
-        response = self.client.get(url)
+        response = self.client.post(
+            reverse("liquidacion_exportar"),
+            data={
+                "formato": "csv",
+                "payload": json.dumps({"filas": [fila]}),
+            },
+        )
         self.assertEqual(response.status_code, 200)
         contenido = response.content.decode("utf-8").splitlines()
         reader = csv.DictReader(contenido)
@@ -666,9 +673,13 @@ class LiquidacionExportarTests(LiquidacionTestBase):
     def test_exporta_csv_campo_vacio_generar_na(self):
         fila = self.build_fila_payload()
         fila["cuentas"]["inc"] = None
-        payload = quote(json.dumps({"filas": [fila]}))
-        url = reverse("liquidacion_exportar") + f"?formato=csv&payload={payload}"
-        response = self.client.get(url)
+        response = self.client.post(
+            reverse("liquidacion_exportar"),
+            data={
+                "formato": "csv",
+                "payload": json.dumps({"filas": [fila]}),
+            },
+        )
         self.assertEqual(response.status_code, 200)
         contenido = response.content.decode("utf-8").splitlines()
         reader = csv.DictReader(contenido)
@@ -680,9 +691,13 @@ class LiquidacionExportarTests(LiquidacionTestBase):
         self.parametros["TOTAL_NETO"].delete()
         fila = self.build_fila_payload()
         fila["cuentas"]["total_neto"] = None
-        payload = quote(json.dumps({"filas": [fila]}))
-        url = reverse("liquidacion_exportar") + f"?formato=csv&payload={payload}"
-        response = self.client.get(url)
+        response = self.client.post(
+            reverse("liquidacion_exportar"),
+            data={
+                "formato": "csv",
+                "payload": json.dumps({"filas": [fila]}),
+            },
+        )
         self.assertEqual(response.status_code, 200)
         contenido = response.content.decode("utf-8").splitlines()
         reader = csv.DictReader(contenido)

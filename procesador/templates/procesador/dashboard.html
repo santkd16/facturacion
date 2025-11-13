@@ -169,6 +169,12 @@
       </div>
     </div>
 
+    <form id="form-exportar" method="post" action="{% url 'liquidacion_exportar' %}" style="display:none;">
+      {% csrf_token %}
+      <input type="hidden" name="formato" value="csv">
+      <input type="hidden" name="payload" id="exportar-payload">
+    </form>
+
     <div id="liquidacion-mensajes" role="status" aria-live="polite" style="margin:.75rem 0;"></div>
 
     <div id="panel-filtros" class="panel-filtros" hidden>
@@ -812,8 +818,14 @@
 
     document.getElementById('btn-exportar')?.addEventListener('click', () => {
       const filas = recolectarFilas();
-      const payload = encodeURIComponent(JSON.stringify({ filas }));
-      window.location.href = `{% url "liquidacion_exportar" %}?formato=csv&payload=${payload}`;
+      const form = document.getElementById('form-exportar');
+      const inputPayload = document.getElementById('exportar-payload');
+      if (!form || !inputPayload) {
+        console.error('No se encontró el formulario de exportación.');
+        return;
+      }
+      inputPayload.value = JSON.stringify({ filas });
+      form.submit();
     });
   </script>
 </body>
