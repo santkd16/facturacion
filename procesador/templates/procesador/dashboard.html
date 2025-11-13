@@ -215,6 +215,7 @@
             <th>CUFE/CUDE</th>
             <th>NIT</th>
             <th>Proveedor</th>
+            <th>Listo</th>
             <th>Fecha</th>
             <th>Descripción</th>
             <th>Prefijo + Folio</th>
@@ -255,11 +256,18 @@
             data-iva="{{ fila.iva_raw }}"
             data-inc="{{ fila.inc_raw }}"
             data-total-neto-base="{{ fila.total_neto_raw }}"
+            data-listo="{% if fila.listo %}true{% else %}false{% endif %}"
           >
             <td>{{ fila.tipo_documento }}</td>
             <td>{{ fila.cufe }}</td>
             <td>{{ fila.nit }}</td>
             <td>{{ fila.proveedor_nombre }}</td>
+            <td class="estado-listo">
+              <label>
+                <input type="checkbox" class="marca-listo" disabled aria-label="Estado de validación de la fila">
+                <span class="estado-texto estado-pendiente">Pendiente</span>
+              </label>
+            </td>
             <td>{{ fila.fecha }}</td>
             <td>{{ fila.descripcion_display }}</td>
             <td>{{ fila.prefijo_folio }}</td>

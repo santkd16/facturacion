@@ -529,6 +529,7 @@ class LiquidacionValidacionTests(LiquidacionTestBase):
             resultado["cuentas"]["subtotal"], self.parametros["SUBTOTAL"].id
         )
         self.assertEqual(resultado["porcentajes"]["retefuente"], "4.0000")
+        self.assertTrue(resultado["listo"])
 
     def test_omitir_cuenta_no_bloquea_validacion(self):
         fila = self.build_fila_payload()
